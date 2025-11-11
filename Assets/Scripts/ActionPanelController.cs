@@ -1,7 +1,12 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
+using WonderPokerCore;
 
-public class ActionPanelController : MonoBehaviour
+public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
 {
     [Header("UI")]
     [SerializeField] private Button foldButton;
@@ -10,282 +15,255 @@ public class ActionPanelController : MonoBehaviour
     [SerializeField] private Slider betSlider;
     [SerializeField] private Text betValueText;
 
-    [Header("Gameplay")]
-    [SerializeField] private GameStateMachine game; // Старая система (для совместимости)
-    [SerializeField] private GameManager gameManager; // Новая система
-    [SerializeField] private int minBet = 100;
-    [SerializeField] private int maxBet = 1000;
+    [Header("Настройки по умолчанию")]
     [SerializeField] private int betStep = 50;
-    
-    // Состояние панели
-    private bool isEnabled = false;
-    private Player currentPlayer;
+
+    [Header("Совместимость")]
+    [SerializeField] private GameStateMachine legacyStateMachine;
+    [SerializeField] private GameManager gameManager;
+
+    private bool panelEnabled = false;
+    private DecisionRequest activeRequest;
+    private TaskCompletionSource<PlayerDecision> pendingDecision;
+    private CancellationTokenRegistration cancellationRegistration;
+    private int callAmount;
+    private int minTotalBet;
+    private int maxTotalBet;
+    private int defaultSliderMin = 0;
+    private int defaultSliderMax = 0;
 
     private void Awake()
     {
-        if (foldButton != null) foldButton.onClick.AddListener(OnFold);
-        if (checkCallButton != null) checkCallButton.onClick.AddListener(OnCheckCall);
-        if (betRaiseButton != null) betRaiseButton.onClick.AddListener(OnBetRaise);
+        if (foldButton != null) foldButton.onClick.AddListener(OnFoldClicked);
+        if (checkCallButton != null) checkCallButton.onClick.AddListener(OnCheckCallClicked);
+        if (betRaiseButton != null) betRaiseButton.onClick.AddListener(OnBetRaiseClicked);
 
-        SetupSlider(minBet, maxBet, betStep);
-        
-        // Находим GameManager если не назначен
+        if (betSlider != null)
+        {
+            betSlider.wholeNumbers = true;
+            betSlider.onValueChanged.AddListener(OnSliderChanged);
+            defaultSliderMin = Mathf.RoundToInt(betSlider.minValue);
+            defaultSliderMax = Mathf.RoundToInt(betSlider.maxValue);
+        }
+
         if (gameManager == null)
             gameManager = FindObjectOfType<GameManager>();
-            
-        // Подписываемся на события GameManager
+
         if (gameManager != null)
-        {
-            gameManager.OnPlayerTurn += OnPlayerTurn;
-            gameManager.OnPhaseChanged += OnPhaseChanged;
-        }
-        
-    // Не скрываем панель автоматически, чтобы она была видна при старте
+            gameManager.OnPhaseChanged += HandlePhaseChanged;
     }
 
     private void OnDestroy()
     {
-        if (foldButton != null) foldButton.onClick.RemoveListener(OnFold);
-        if (checkCallButton != null) checkCallButton.onClick.RemoveListener(OnCheckCall);
-        if (betRaiseButton != null) betRaiseButton.onClick.RemoveListener(OnBetRaise);
-        if (betSlider != null) betSlider.onValueChanged.RemoveAllListeners();
+        if (foldButton != null) foldButton.onClick.RemoveListener(OnFoldClicked);
+        if (checkCallButton != null) checkCallButton.onClick.RemoveListener(OnCheckCallClicked);
+        if (betRaiseButton != null) betRaiseButton.onClick.RemoveListener(OnBetRaiseClicked);
+        if (betSlider != null) betSlider.onValueChanged.RemoveListener(OnSliderChanged);
+
+        if (gameManager != null)
+            gameManager.OnPhaseChanged -= HandlePhaseChanged;
+
+        CancelPendingDecision();
     }
 
     public void SetupSlider(int min, int max, int step)
     {
-        minBet = Mathf.Max(1, min);
-        maxBet = Mathf.Max(minBet, max);
-        betStep = Mathf.Max(1, step);
-
+        if (step > 0) betStep = step;
         if (betSlider == null) return;
-        betSlider.minValue = minBet;
-        betSlider.maxValue = maxBet;
-        betSlider.wholeNumbers = true;
-        betSlider.value = minBet;
-        betSlider.onValueChanged.AddListener(UpdateBetLabel);
-        UpdateBetLabel(betSlider.value);
+
+        defaultSliderMin = min;
+        defaultSliderMax = Mathf.Max(min, max);
+        betSlider.minValue = defaultSliderMin;
+        betSlider.maxValue = defaultSliderMax;
+        betSlider.value = defaultSliderMin;
+        OnSliderChanged(betSlider.value);
     }
 
-    private int GetRoundedBet()
+    public Task<PlayerDecision> RequestDecisionAsync(DecisionRequest request, CancellationToken cancellationToken)
     {
-        if (betSlider == null) return minBet;
-        int raw = Mathf.RoundToInt(betSlider.value);
-        int stepped = ((raw - minBet + betStep - 1) / betStep) * betStep + minBet;
-        return Mathf.Clamp(stepped, minBet, maxBet);
-    }
+        CancelPendingDecision();
 
-    private void UpdateBetLabel(float _)
-    {
-        if (betValueText != null)
-            betValueText.text = GetRoundedBet().ToString();
-    }
+        activeRequest = request ?? throw new ArgumentNullException(nameof(request));
+        ConfigureForCurrentRequest();
+        SetPanelEnabled(true);
 
-    /// <summary>
-    /// Включает/выключает панель действий
-    /// </summary>
-    public void SetPanelEnabled(bool enabled)
-    {
-        isEnabled = enabled;
-        gameObject.SetActive(enabled);
-        
-        if (enabled)
+        pendingDecision = new TaskCompletionSource<PlayerDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (cancellationToken.CanBeCanceled)
         {
-            UpdateButtonStates();
+            cancellationRegistration = cancellationToken.Register(CancelPendingDecision);
+        }
+
+        return pendingDecision.Task;
+    }
+
+    private void ConfigureForCurrentRequest()
+    {
+        if (activeRequest == null || activeRequest.Player == null || activeRequest.Table == null)
+            return;
+
+        var player = activeRequest.Player;
+        var table = activeRequest.Table;
+
+        callAmount = Math.Max(0, table.CurrentBid - player.PlayersCurrentBet);
+        int availableTokens = player.TokensCount;
+        bool canCheck = callAmount == 0;
+        bool canCall = availableTokens > 0 || canCheck;
+
+        int minimumRaiseUnit = table.Settings.BigBlind > 0 ? table.Settings.BigBlind : 1;
+        if (table.CurrentBid > 0)
+            minimumRaiseUnit = Math.Max(minimumRaiseUnit, table.CurrentBid);
+
+        int maxTotal = callAmount + availableTokens;
+        int minRaiseTotal = callAmount + minimumRaiseUnit;
+
+        bool canRaise = availableTokens > Math.Max(0, minRaiseTotal - callAmount);
+        if (!canRaise && availableTokens > 0 && table.CurrentBid == 0)
+        {
+            minRaiseTotal = callAmount + availableTokens;
+            canRaise = availableTokens > 0;
+        }
+
+        minTotalBet = Mathf.Clamp(minRaiseTotal, callAmount, maxTotal);
+        maxTotalBet = maxTotal;
+
+        if (betSlider != null)
+        {
+            betSlider.gameObject.SetActive(canRaise);
+            if (canRaise)
+            {
+                betSlider.minValue = minTotalBet;
+                betSlider.maxValue = Math.Max(minTotalBet, maxTotalBet);
+                betSlider.value = betSlider.minValue;
+            }
+        }
+
+        if (betValueText != null)
+        {
+            betValueText.text = canRaise ? Mathf.RoundToInt(betSlider.value).ToString() : "-";
+        }
+
+        if (foldButton != null)
+        {
+            foldButton.gameObject.SetActive(true);
+            foldButton.interactable = !IsLastStanding(player);
+        }
+
+        if (checkCallButton != null)
+        {
+            checkCallButton.gameObject.SetActive(true);
+            checkCallButton.interactable = canCall || canCheck;
+            var label = checkCallButton.GetComponentInChildren<Text>();
+            if (label != null)
+            {
+                if (canCheck && callAmount == 0)
+                    label.text = "Check";
+                else
+                {
+                    int callDisplay = Math.Min(callAmount, availableTokens + player.PlayersCurrentBet);
+                    label.text = callDisplay <= 0 ? "Check" : $"Call {callDisplay}";
+                }
+            }
+        }
+
+        if (betRaiseButton != null)
+        {
+            betRaiseButton.gameObject.SetActive(canRaise);
+            betRaiseButton.interactable = canRaise;
+            var label = betRaiseButton.GetComponentInChildren<Text>();
+            if (label != null)
+                label.text = table.CurrentBid == 0 ? "Bet" : "Raise";
         }
     }
 
-    /// <summary>
-    /// Обновляет состояние кнопок в зависимости от игровой ситуации
-    /// </summary>
-    private void UpdateButtonStates()
+    private void SetPanelEnabled(bool enabled)
     {
-        if (gameManager == null || currentPlayer == null)
+        panelEnabled = enabled;
+        gameObject.SetActive(enabled);
+    }
+
+    private void OnFoldClicked()
+    {
+        if (!panelEnabled || pendingDecision == null || activeRequest == null)
+            return;
+
+        if (IsLastStanding(activeRequest.Player))
         {
-            SetAllButtonsEnabled(false);
+            CompleteDecision(new PlayerDecision(PlayerDecisionType.Check));
             return;
         }
 
-        // Fold всегда доступен
-        if (foldButton != null)
-            foldButton.interactable = true;
+        CompleteDecision(new PlayerDecision(PlayerDecisionType.Fold));
+    }
 
-        // Check/Call логика
-        if (checkCallButton != null)
+    private void OnCheckCallClicked()
+    {
+        if (!panelEnabled || pendingDecision == null || activeRequest == null)
+            return;
+
+        if (callAmount <= 0)
         {
-            bool canCheck = gameManager.CurrentBet == 0 || currentPlayer.CurrentBet == gameManager.CurrentBet;
-            bool canCall = gameManager.CurrentBet > currentPlayer.CurrentBet && currentPlayer.Stack > 0;
-            
-            checkCallButton.interactable = canCheck || canCall;
-            
-            // Обновляем текст кнопки
-            var buttonText = checkCallButton.GetComponentInChildren<Text>();
-            if (buttonText != null)
-            {
-                if (canCheck && gameManager.CurrentBet == currentPlayer.CurrentBet)
-                {
-                    buttonText.text = "Check";
-                }
-                else if (canCall)
-                {
-                    int callAmount = gameManager.CurrentBet - currentPlayer.CurrentBet;
-                    buttonText.text = $"Call {callAmount}";
-                }
-                else
-                {
-                    buttonText.text = "Check";
-                }
-            }
+            CompleteDecision(new PlayerDecision(PlayerDecisionType.Check));
         }
-
-        // Bet/Raise логика
-        if (betRaiseButton != null)
+        else
         {
-            bool canBetRaise = currentPlayer.Stack > 0;
-            betRaiseButton.interactable = canBetRaise;
-            
-            // Обновляем текст кнопки
-            var buttonText = betRaiseButton.GetComponentInChildren<Text>();
-            if (buttonText != null)
-            {
-                if (gameManager.CurrentBet == 0)
-                {
-                    buttonText.text = "Bet";
-                }
-                else
-                {
-                    buttonText.text = "Raise";
-                }
-            }
+            CompleteDecision(new PlayerDecision(PlayerDecisionType.Call));
         }
-
-        // Обновляем слайдер
-        UpdateSliderRange();
     }
 
-    /// <summary>
-    /// Обновляет диапазон слайдера в зависимости от игровой ситуации
-    /// </summary>
-    private void UpdateSliderRange()
+    private void OnBetRaiseClicked()
     {
-        if (betSlider == null || currentPlayer == null || gameManager == null) return;
+        if (!panelEnabled || pendingDecision == null || activeRequest == null || betSlider == null)
+            return;
 
-        int minRaise = gameManager.CurrentBet == 0 ? gameManager.BigBlind : gameManager.CurrentBet * 2;
-        int maxRaise = currentPlayer.Stack + currentPlayer.CurrentBet;
-        
-        // Минимальная ставка не может быть больше стека игрока
-        minRaise = Mathf.Min(minRaise, maxRaise);
-        
-        betSlider.minValue = minRaise;
-        betSlider.maxValue = maxRaise;
-        betSlider.value = minRaise;
-        
-        UpdateBetLabel(betSlider.value);
+        int totalBet = Mathf.RoundToInt(betSlider.value);
+        int raiseAmount = Math.Max(0, totalBet - callAmount);
+        CompleteDecision(new PlayerDecision(PlayerDecisionType.Raise, raiseAmount));
     }
 
-    /// <summary>
-    /// Устанавливает доступность всех кнопок
-    /// </summary>
-    private void SetAllButtonsEnabled(bool enabled)
+    private void OnSliderChanged(float value)
     {
-        if (foldButton != null) foldButton.interactable = enabled;
-        if (checkCallButton != null) checkCallButton.interactable = enabled;
-        if (betRaiseButton != null) betRaiseButton.interactable = enabled;
-        if (betSlider != null) betSlider.interactable = enabled;
+        if (betValueText != null)
+            betValueText.text = Mathf.RoundToInt(value).ToString();
     }
 
-    // === ОБРАБОТЧИКИ СОБЫТИЙ GAMEMANAGER ===
-    
-    private void OnPlayerTurn(Player player)
+    private void CompleteDecision(PlayerDecision decision)
     {
-        currentPlayer = player;
-        
-        // Панель активна только для текущего игрока
-        // TODO: Здесь нужно проверить, что это локальный игрок
-        bool isLocalPlayer = true; // Пока что считаем всех игроков локальными
-        
-        SetPanelEnabled(isLocalPlayer);
-        
-        Debug.Log($"ActionPanel: {player.Name}'s turn");
+        if (pendingDecision == null)
+            return;
+
+        cancellationRegistration.Dispose();
+        pendingDecision.TrySetResult(decision);
+        pendingDecision = null;
+        activeRequest = null;
+        SetPanelEnabled(false);
     }
 
-    private void OnPhaseChanged(GamePhase phase)
+    private void CancelPendingDecision()
     {
-        Debug.Log($"ActionPanel: Phase changed to {phase}");
-        
-        // Отключаем панель во время шоудауна и завершения раздачи
+        cancellationRegistration.Dispose();
+        if (pendingDecision != null)
+        {
+            pendingDecision.TrySetCanceled();
+            pendingDecision = null;
+        }
+        activeRequest = null;
+        SetPanelEnabled(false);
+    }
+
+    private void HandlePhaseChanged(GamePhase phase)
+    {
         if (phase == GamePhase.Showdown || phase == GamePhase.HandComplete)
         {
-            SetPanelEnabled(false);
+            CancelPendingDecision();
         }
     }
 
-    // === ОБРАБОТЧИКИ КНОПОК ===
-    
-    private void OnFold()
+    private bool IsLastStanding(WonderPokerCore.Player player)
     {
-        if (!isEnabled || currentPlayer == null) return;
-        
-        // Используем новый GameManager
-        if (gameManager != null)
-        {
-            gameManager.ProcessPlayerAction("fold");
-        }
-        // Совместимость со старой системой
-        else if (game != null)
-        {
-            game.PlayerAction(PlayerActionType.Fold, 0);
-        }
-        
-        SetPanelEnabled(false);
-    }
+        if (player == null || activeRequest == null || activeRequest.Table == null)
+            return false;
 
-    private void OnCheckCall()
-    {
-        if (!isEnabled || currentPlayer == null) return;
-        
-        if (gameManager != null)
-        {
-            if (gameManager.CurrentBet == 0 || currentPlayer.CurrentBet == gameManager.CurrentBet)
-            {
-                gameManager.ProcessPlayerAction("check");
-            }
-            else
-            {
-                gameManager.ProcessPlayerAction("call");
-            }
-        }
-        else if (game != null)
-        {
-            game.PlayerAction(PlayerActionType.CheckOrCall, 0);
-        }
-        
-        SetPanelEnabled(false);
-    }
-
-    private void OnBetRaise()
-    {
-        if (!isEnabled || currentPlayer == null) return;
-        
-        int betAmount = GetRoundedBet();
-        
-        if (gameManager != null)
-        {
-            if (gameManager.CurrentBet == 0)
-            {
-                gameManager.ProcessPlayerAction("bet", betAmount);
-            }
-            else
-            {
-                gameManager.ProcessPlayerAction("raise", betAmount);
-            }
-        }
-        else if (game != null)
-        {
-            game.PlayerAction(PlayerActionType.BetOrRaise, betAmount);
-        }
-        
-        SetPanelEnabled(false);
+        int activeCount = activeRequest.Table.Players.Count(p => !p.Folded);
+        return activeCount <= 1;
     }
 }
-
-

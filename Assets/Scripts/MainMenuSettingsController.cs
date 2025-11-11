@@ -104,7 +104,13 @@ public class MainMenuSettingsController : MonoBehaviour
     {
         var lang = (AppLanguage)Mathf.Clamp(idx, 0, 1);
         LocalizationManager.CurrentLanguage = lang;
-        // Здесь можно обновлять тексты меню, когда появится словарь локализации
+
+        if (languageDropdown != null && languageDropdown.options.Count >= 2)
+        {
+            languageDropdown.options[0].text = lang == AppLanguage.Russian ? "Русский" : "Russian";
+            languageDropdown.options[1].text = lang == AppLanguage.Russian ? "English" : "English";
+            languageDropdown.RefreshShownValue();
+        }
     }
     
     private void OnLogoutClicked()

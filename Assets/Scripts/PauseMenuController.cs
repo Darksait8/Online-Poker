@@ -11,6 +11,9 @@ public class PauseMenuController : MonoBehaviour
     [SerializeField] private Button mainMenuButton;
     [SerializeField] private Button exitButton;
 
+    [Header("Главные кнопки")]
+    [SerializeField] private GameObject pauseContent;
+
     [Header("Настройки внутри паузы")]
     [SerializeField] private GameObject settingsPanel;        // внутренняя панель настроек
     [SerializeField] private Slider masterVolumeSlider;       // громкость
@@ -32,6 +35,7 @@ public class PauseMenuController : MonoBehaviour
         isPaused = false;
 
         if (pausePanel != null) pausePanel.SetActive(false);
+        if (pauseContent != null) pauseContent.SetActive(true);
         if (settingsPanel != null) settingsPanel.SetActive(false);
 
         if (resumeButton != null) resumeButton.onClick.AddListener(Resume);
@@ -93,6 +97,7 @@ public class PauseMenuController : MonoBehaviour
         isPaused = true;
         Time.timeScale = 0f;
         if (pausePanel != null) pausePanel.SetActive(true);
+        if (pauseContent != null) pauseContent.SetActive(true);
         if (settingsPanel != null) settingsPanel.SetActive(false);
     }
 
@@ -107,11 +112,13 @@ public class PauseMenuController : MonoBehaviour
     private void ShowSettings()
     {
         if (settingsPanel != null) settingsPanel.SetActive(true);
+        if (pauseContent != null) pauseContent.SetActive(false);
     }
 
     private void HideSettings()
     {
         if (settingsPanel != null) settingsPanel.SetActive(false);
+        if (pauseContent != null) pauseContent.SetActive(true);
     }
 
     private void LoadMainMenu()

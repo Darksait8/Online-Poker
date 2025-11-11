@@ -33,6 +33,8 @@ public class AuthUIController : MonoBehaviour
     [Header("Настройки")]
     [SerializeField] private string mainMenuSceneName = "MainMenu";
     [SerializeField] private float loadingDelay = 1f;
+
+    private bool isAuthenticating;
     
     private void Awake()
     {
@@ -46,6 +48,7 @@ public class AuthUIController : MonoBehaviour
         
         // Показываем панель входа по умолчанию
         ShowLoginPanel();
+        SetInteractionEnabled(true);
         
         // Проверяем, не авторизован ли пользователь уже
         if (AuthManager.IsLoggedIn)
@@ -93,7 +96,7 @@ public class AuthUIController : MonoBehaviour
         string password = loginPasswordField != null ? loginPasswordField.text : "";
         
         ClearMessages();
-        ShowLoading(true);
+        BeginAuthOperation();
         
         AuthManager.Login(username, password);
     }
@@ -101,7 +104,7 @@ public class AuthUIController : MonoBehaviour
     private void OnLoginAsGuestClicked()
     {
         ClearMessages();
-        ShowLoading(true);
+        BeginAuthOperation();
         
         // Используем метод AuthManager для входа как гость
         AuthManager.LoginAsGuest();
@@ -115,14 +118,14 @@ public class AuthUIController : MonoBehaviour
         string confirmPassword = registerConfirmPasswordField != null ? registerConfirmPasswordField.text : "";
         
         ClearMessages();
-        ShowLoading(true);
+        BeginAuthOperation();
         
         AuthManager.Register(username, email, password, confirmPassword);
     }
     
     private void OnUserLoggedIn(UserProfile user)
     {
-        ShowLoading(false);
+        EndAuthOperation();
         ShowSuccessMessage($"Добро пожаловать, {user.username}!");
         
         // Переходим в главное меню через небольшую задержку
@@ -131,13 +134,13 @@ public class AuthUIController : MonoBehaviour
     
     private void OnUserLoggedOut()
     {
-        ShowLoading(false);
+        EndAuthOperation();
         ClearMessages();
     }
     
     private void OnAuthError(string errorMessage)
     {
-        ShowLoading(false);
+        EndAuthOperation();
         ShowErrorMessage(errorMessage);
     }
     
@@ -189,5 +192,36 @@ public class AuthUIController : MonoBehaviour
     {
         AuthManager.ClearAllUserData();
         Debug.Log("Все данные пользователя очищены");
+    }
+
+    private void BeginAuthOperation()
+    {
+        isAuthenticating = true;
+        SetInteractionEnabled(false);
+        ShowLoading(true);
+    }
+
+    private void EndAuthOperation()
+    {
+        isAuthenticating = false;
+        ShowLoading(false);
+        SetInteractionEnabled(true);
+    }
+
+    private void SetInteractionEnabled(bool enabled)
+    {
+        if (!enabled && !isAuthenticating)
+            enabled = true;
+
+        if (loginUsernameField != null) loginUsernameField.interactable = enabled;
+        if (loginPasswordField != null) loginPasswordField.interactable = enabled;
+        if (loginButton != null) loginButton.interactable = enabled;
+        if (loginAsGuestButton != null) loginAsGuestButton.interactable = enabled;
+
+        if (registerUsernameField != null) registerUsernameField.interactable = enabled;
+        if (registerEmailField != null) registerEmailField.interactable = enabled;
+        if (registerPasswordField != null) registerPasswordField.interactable = enabled;
+        if (registerConfirmPasswordField != null) registerConfirmPasswordField.interactable = enabled;
+        if (registerButton != null) registerButton.interactable = enabled;
     }
 }

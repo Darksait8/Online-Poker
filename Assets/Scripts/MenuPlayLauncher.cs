@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using TMPro;
 
 public class MenuPlayLauncher : MonoBehaviour
 {
@@ -18,6 +19,7 @@ public class MenuPlayLauncher : MonoBehaviour
     [Header("Что скрывать/показывать при переходах")]
     [SerializeField] private GameObject primaryButtons;     // блок главных кнопок
     [SerializeField] private GameObject menuBackground;     // фон главного меню (если есть)
+    [SerializeField] private Button backToAuthButton;
 
     [Header("Сцена со столом")]
     [SerializeField] private string gameSceneName = "Main";
@@ -28,6 +30,10 @@ public class MenuPlayLauncher : MonoBehaviour
         if (openCreateTableButton != null) openCreateTableButton.onClick.AddListener(OpenCreatePanel);
         if (createAndPlayButton != null) createAndPlayButton.onClick.AddListener(CreateAndPlay);
         if (cancelCreateButton != null) cancelCreateButton.onClick.AddListener(CloseCreatePanel);
+        EnsureBackButtonHook();
+
+        if (maxSeatsDropdown != null)
+            DropdownStyler.Apply(maxSeatsDropdown);
 
         if (createPanel != null) createPanel.SetActive(false);
     }
@@ -38,6 +44,7 @@ public class MenuPlayLauncher : MonoBehaviour
         if (openCreateTableButton != null) openCreateTableButton.onClick.RemoveListener(OpenCreatePanel);
         if (createAndPlayButton != null) createAndPlayButton.onClick.RemoveListener(CreateAndPlay);
         if (cancelCreateButton != null) cancelCreateButton.onClick.RemoveListener(CloseCreatePanel);
+        if (backToAuthButton != null) backToAuthButton.onClick.RemoveListener(HandleBackToAuth);
     }
 
     private void JoinDefaultTable()
@@ -52,7 +59,7 @@ public class MenuPlayLauncher : MonoBehaviour
         
         TableRuntimeConfig.SetPreset(1000, 4); // BB=1000, места=4
         HideMainMenu();
-        SceneTransitionManager.Instance?.LoadGameScene();
+        LoadGameScene();
     }
 
     private void OpenCreatePanel()
@@ -63,12 +70,29 @@ public class MenuPlayLauncher : MonoBehaviour
         if (menuBackground != null) menuBackground.SetActive(false);
     }
 
-    private void CloseCreatePanel()
+    public void CloseCreatePanel()
     {
         if (createPanel != null) createPanel.SetActive(false);
         // Возвращаем главное меню
         if (primaryButtons != null) primaryButtons.SetActive(true);
         if (menuBackground != null) menuBackground.SetActive(true);
+    }
+
+    public bool IsCreatePanelOpen => createPanel != null && createPanel.activeSelf;
+
+    public void SetMainMenuVisible(bool visible)
+    {
+        if (!visible)
+        {
+            if (createPanel != null) createPanel.SetActive(false);
+            if (primaryButtons != null) primaryButtons.SetActive(false);
+            if (menuBackground != null) menuBackground.SetActive(false);
+        }
+        else
+        {
+            if (primaryButtons != null) primaryButtons.SetActive(true);
+            if (menuBackground != null) menuBackground.SetActive(true);
+        }
     }
 
     private void CreateAndPlay()
@@ -125,7 +149,7 @@ public class MenuPlayLauncher : MonoBehaviour
         Debug.Log($"Конфигурация установлена: Big Blind = {TableRuntimeConfig.BigBlind}, Max Seats = {TableRuntimeConfig.MaxSeats}, HasConfig = {TableRuntimeConfig.HasConfig}");
         
         HideMainMenu();
-        SceneTransitionManager.Instance?.LoadGameScene();
+        LoadGameScene();
     }
 
     private void HideMainMenu()
@@ -134,6 +158,58 @@ public class MenuPlayLauncher : MonoBehaviour
         if (menuBackground != null) menuBackground.SetActive(false);
         // саму панель можно также скрыть
         gameObject.SetActive(false);
+    }
+
+    private void LoadGameScene()
+    {
+        if (SceneTransitionManager.Instance != null)
+        {
+            SceneTransitionManager.Instance.LoadGameScene();
+            return;
+        }
+
+        var sceneName = string.IsNullOrWhiteSpace(gameSceneName) ? "Main" : gameSceneName;
+        SceneManager.LoadScene(sceneName);
+    }
+
+    private void HandleBackToAuth()
+    {
+        if (AuthManager.IsLoggedIn)
+            AuthManager.Logout();
+
+        if (SceneTransitionManager.Instance != null)
+            SceneTransitionManager.Instance.LoadAuthScene();
+        else
+            SceneManager.LoadScene("Auth");
+    }
+
+    private void EnsureBackButtonHook()
+    {
+        if (backToAuthButton != null)
+        {
+            backToAuthButton.onClick.AddListener(HandleBackToAuth);
+            return;
+        }
+
+        var buttons = GetComponentsInChildren<Button>(true);
+        foreach (var btn in buttons)
+        {
+            if (btn == joinDefaultTableButton || btn == openCreateTableButton || btn == createAndPlayButton || btn == cancelCreateButton)
+                continue;
+
+            var text = btn.GetComponentInChildren<Text>(true);
+            var tmpText = btn.GetComponentInChildren<TMP_Text>(true);
+            string caption = text != null ? text.text : null;
+            if (string.IsNullOrEmpty(caption) && tmpText != null)
+                caption = tmpText.text;
+
+            if (!string.IsNullOrEmpty(caption) && caption.Trim().ToLowerInvariant() == "назад")
+            {
+                backToAuthButton = btn;
+                backToAuthButton.onClick.AddListener(HandleBackToAuth);
+                break;
+            }
+        }
     }
 }
 

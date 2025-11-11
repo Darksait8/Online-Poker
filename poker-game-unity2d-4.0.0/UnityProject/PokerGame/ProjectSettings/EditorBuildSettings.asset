@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 0
+    path: 
+    guid: 00000000000000000000000000000000
+  - enabled: 1
+    path: Assets/Scenes/Menu/MainMenu.unity
+    guid: 9df1b874b8245134fb91d9b804a06c29
+  - enabled: 1
+    path: Assets/Scenes/Game/CreateTable.unity
+    guid: 3299a85419a892d4aab175d21ba7b051
+  - enabled: 1
+    path: Assets/Scenes/Menu/EndOfHandMenu.unity
+    guid: cb9cd5d6b7c5dac4690ef2d739ff9f03
+  - enabled: 1
+    path: Assets/Scenes/Game/JoinTable.unity
+    guid: 97d303b339b211248a935d27b33f5453
+  - enabled: 1
+    path: Assets/Scenes/Menu/PlayMenu.unity
+    guid: 505ed374472e98d4d90e746cf8011cc5
+  - enabled: 1
+    path: Assets/Scenes/Game/Table.unity
+    guid: 8c31d4d8e0a374a41b616fa8e1b5908e
+  - enabled: 1
+    path: Assets/Scenes/SignIn/SignInMenu.unity
+    guid: 2eb9c5b2abac4d040bded7ec61a85295
+  - enabled: 1
+    path: Assets/Scenes/SignIn/CreatePlayer.unity
+    guid: 40de24593eaa8b24bbe1e8ec692687dd
+  - enabled: 1
+    path: Assets/Scenes/SignIn/Login.unity
+    guid: ed79c9bc35b19834eacc4b31075dfa2d
+  - enabled: 1
+    path: Assets/Scenes/Game/TableSettings.unity
+    guid: 340903650164d8f49bdf0c86240e9412
+  - enabled: 1
+    path: Assets/Scenes/Menu/ChangeNameMenu.unity
+    guid: ea00d0af0dec86b41bc13241808d4714
+  - enabled: 1
+    path: Assets/Scenes/Menu/ChangePasswordMenu.unity
+    guid: 9da2539c66bbc494595a6c60e9e92e2a
+  - enabled: 1
+    path: Assets/Scenes/Menu/DeleteAccount.unity
+    guid: cc619d2d7df5deb40bf301a550d44517
+  - enabled: 1
+    path: Assets/Scenes/Menu/GetTokensMenu.unity
+    guid: 129f675d92203a04984925ab38417367
+  - enabled: 1
+    path: Assets/Scenes/Menu/SettingsMenu.unity
+    guid: 384a8b26b65e5be4786a5f490fdaa631
+  m_configObjects: {}

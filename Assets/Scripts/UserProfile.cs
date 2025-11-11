@@ -5,6 +5,8 @@ using System.Collections.Generic;
 [System.Serializable]
 public class UserProfile
 {
+    public const string CustomAvatarId = "custom";
+
     [Header("Основная информация")]
     public string username;
     public string email;
@@ -39,6 +41,19 @@ public class UserProfile
     [Header("Достижения")]
     public List<string> achievements;
     public List<string> unlockedAvatars;
+    
+    [Header("Аватар")]
+    public string avatarId = "default";
+    public string customAvatarPath;
+
+    public int Level => PlayerProgressionService.GetLevel(XP);
+    public int XpToNextLevel => PlayerProgressionService.GetXpToNextLevel(XP);
+    public float LevelProgress => PlayerProgressionService.GetProgress01(XP);
+
+    [Header("Друзья")]
+    public List<string> friends;
+    public List<FriendRequestData> incomingFriendRequests;
+    public List<FriendRequestData> outgoingFriendRequests;
     
     [Header("Сессионные данные")]
     public int currentSessionChips; // Фишки в текущей сессии
@@ -80,6 +95,12 @@ public class UserProfile
         // Достижения
         achievements = new List<string>();
         unlockedAvatars = new List<string>();
+        if (!unlockedAvatars.Contains("default"))
+            unlockedAvatars.Add("default");
+
+        friends = new List<string>();
+        incomingFriendRequests = new List<FriendRequestData>();
+        outgoingFriendRequests = new List<FriendRequestData>();
         
         // Сессия
         currentSessionChips = 0;
@@ -203,6 +224,43 @@ public class UserProfile
             Debug.Log($"Аватар разблокирован: {avatarId}");
         }
     }
+    
+    /// <summary>
+    /// Устанавливает текущий аватар пользователя
+    /// </summary>
+    public void SetAvatar(string avatarId)
+    {
+        if (string.IsNullOrWhiteSpace(avatarId))
+            return;
+        
+        this.avatarId = avatarId;
+        if (avatarId != CustomAvatarId)
+        {
+            customAvatarPath = null;
+        }
+        UnlockAvatar(avatarId);
+    }
+
+    /// <summary>
+    /// Устанавливает пользовательский аватар
+    /// </summary>
+    public void SetCustomAvatar(string avatarPath)
+    {
+        if (string.IsNullOrWhiteSpace(avatarPath))
+            return;
+
+        avatarId = CustomAvatarId;
+        customAvatarPath = avatarPath;
+        UnlockAvatar(avatarId);
+    }
+}
+
+[System.Serializable]
+public class FriendRequestData
+{
+    public string from;
+    public string to;
+    public long createdAtTicks;
 }
 
 [System.Serializable]
@@ -234,6 +292,10 @@ public class GameSettings
     public float uiScale = 1f;
     public bool showTooltips = true;
     public bool compactMode = false;
+    public float brightness = 1f;
+    
+    [Header("Внешний вид карт")]
+    public string cardThemeId = "default";
     
     [Header("Уведомления")]
     public bool enableNotifications = true;

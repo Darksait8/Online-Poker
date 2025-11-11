@@ -204,6 +204,42 @@ public static class UserDataManager
         
         return usernames;
     }
+
+    public static List<UserProfile> LoadAllProfiles()
+    {
+        var profiles = new List<UserProfile>();
+        try
+        {
+            CreateDirectories();
+            if (!Directory.Exists(ProfilesPath))
+                return profiles;
+
+            string[] files = Directory.GetFiles(ProfilesPath, "*.json");
+            foreach (string file in files)
+            {
+                try
+                {
+                    string json = File.ReadAllText(file);
+                    if (string.IsNullOrWhiteSpace(json))
+                        continue;
+                    var profile = JsonUtility.FromJson<UserProfile>(json);
+                    if (profile != null)
+                        profiles.Add(profile);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Failed to load profile from {file}: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Failed to load profiles: {e.Message}");
+            OnDataError?.Invoke($"Ошибка загрузки профилей: {e.Message}");
+        }
+
+        return profiles;
+    }
     
     /// <summary>
     /// Хеширует пароль
@@ -306,6 +342,22 @@ public static class UserDataManager
             fileName = fileName.Replace(c, '_');
         }
         return fileName;
+    }
+
+    public static string GetUserAvatarDirectory(string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            return null;
+
+        CreateDirectories();
+        string safeUsername = SanitizeFileName(username);
+        string avatarPath = Path.Combine(ProfilesPath, $"{safeUsername}_Files");
+        if (!Directory.Exists(avatarPath))
+        {
+            Directory.CreateDirectory(avatarPath);
+        }
+
+        return avatarPath;
     }
     
     /// <summary>

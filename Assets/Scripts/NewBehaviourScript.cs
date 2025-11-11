@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System;
+using System.Linq;
 
 public class NewBehaviourScript : MonoBehaviour
 {
@@ -23,6 +25,67 @@ public class NewBehaviourScript : MonoBehaviour
     [SerializeField] private Sprite holeCardBack;
     [SerializeField] private GameObject dealerButton;
 
+    [Header("Фишки ставки")]
+    [SerializeField] private BetChipDisplay chipDisplay;
+    private Vector2 cachedInwardDirection = Vector2.down;
+    private float cachedHoleDistance = 28f;
+
+    private void Awake()
+    {
+        EnsureHoleCardBack();
+        EnsureChipDisplay();
+        ShowChips(false);
+    }
+
+    private void EnsureHoleCardBack()
+    {
+        if (holeCardBack == null)
+        {
+            holeCardBack = CardSpriteProvider.GetCardBack();
+        }
+    }
+
+    private void EnsureChipDisplay()
+    {
+        if (chipDisplay == null)
+            chipDisplay = GetComponentInChildren<BetChipDisplay>(true);
+        if (chipDisplay == null)
+            chipDisplay = GetComponent<BetChipDisplay>();
+
+        if (chipDisplay == null)
+        {
+            var anchor = BetBubbleRect;
+            var parent = anchor != null ? anchor : transform as RectTransform;
+            if (parent == null)
+                parent = transform as RectTransform;
+
+            var go = new GameObject("ChipDisplay", typeof(RectTransform), typeof(BetChipDisplay));
+            var rt = go.GetComponent<RectTransform>();
+            rt.SetParent(parent != null ? parent : transform, false);
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = Vector2.zero;
+            chipDisplay = go.GetComponent<BetChipDisplay>();
+        }
+
+        if (chipDisplay == null)
+        {
+            Debug.LogWarning($"[{name}] BetChipDisplay not assigned and auto-creation failed");
+            return;
+        }
+
+        if (chipDisplay != null)
+        {
+            if (BetBubbleRect != null)
+                chipDisplay.SetAnchorTarget(BetBubbleRect);
+            chipDisplay.EnsureChipSet();
+            chipDisplay.InitializeRuntime();
+            var seatRect = transform as RectTransform;
+            if (seatRect != null)
+                chipDisplay.ConfigureSeatAnchor(seatRect, cachedInwardDirection, cachedHoleDistance);
+        }
+    }
+
     public void SetPlayer(string playerName, int stack, Sprite avatar = null)
     {
         if (nameTextTMP != null)
@@ -35,8 +98,13 @@ public class NewBehaviourScript : MonoBehaviour
         else if (stackText != null)
             stackText.text = stack.ToString();
 
-        if (avatarImage != null && avatar != null)
-            avatarImage.sprite = avatar;
+        if (avatarImage != null)
+        {
+            Sprite spriteToUse = avatar ?? avatarImage.sprite ?? AvatarLibrary.GetAvatarSprite("default");
+            avatarImage.sprite = spriteToUse;
+            avatarImage.color = Color.white;
+            avatarImage.enabled = spriteToUse != null;
+        }
     }
 
     public void UpdateStack(int stack)
@@ -49,17 +117,32 @@ public class NewBehaviourScript : MonoBehaviour
 
     public void ShowBet(int chips)
     {
+        if (chipDisplay == null)
+            chipDisplay = GetComponentInChildren<BetChipDisplay>(true);
+        Debug.Log($"[{name}] ShowBet() chips={chips}, hasChipDisplay={(chipDisplay != null)}");
         bool show = chips > 0;
         if (betBubble != null)
             betBubble.SetActive(show);
 
-        if (show)
-        {
+        string valueText = chips.ToString();
             if (betTextTMP != null)
-                betTextTMP.text = chips.ToString();
+            betTextTMP.text = valueText;
             else if (betText != null)
-                betText.text = chips.ToString();
+            betText.text = valueText;
+
+        chipDisplay?.SetAmount(chips);
+    }
+
+    public void ShowChips(bool show)
+    {
+        if (chipDisplay == null)
+            chipDisplay = GetComponentInChildren<BetChipDisplay>(true);
+        chipDisplay?.Show(show);
         }
+
+    public void RepositionChipsRelativeToSeat()
+    {
+        chipDisplay?.Reposition();
     }
 
     public void SetDealer(bool isDealer)
@@ -72,10 +155,36 @@ public class NewBehaviourScript : MonoBehaviour
     {
         if (hole1Image != null) hole1Image.enabled = false;
         if (hole2Image != null) hole2Image.enabled = false;
+        chipDisplay?.Show(false);
+    }
+
+    public RectTransform BetBubbleRect => betBubble != null ? betBubble.transform as RectTransform : null;
+
+    public void ShowHoleBacks()
+    {
+        EnsureHoleCardBack();
+        if (holeCardBack == null)
+        {
+            HideHoles();
+            return;
+        }
+
+        if (hole1Image != null)
+        {
+            hole1Image.sprite = holeCardBack;
+            hole1Image.enabled = true;
+        }
+
+        if (hole2Image != null)
+        {
+            hole2Image.sprite = holeCardBack;
+            hole2Image.enabled = true;
+        }
     }
 
     public void ShowHole(Card a, Card b)
     {
+        EnsureHoleCardBack();
         if (hole1Image != null)
         {
             var s = CardSpriteProvider.GetSprite(a);
@@ -110,6 +219,13 @@ public class NewBehaviourScript : MonoBehaviour
         // inwardDirection должен быть нормализован и указывать К ЦЕНТРУ стола
         if (inwardDirection.sqrMagnitude < 0.0001f) inwardDirection = new Vector2(0f, -1f);
         inwardDirection.Normalize();
+        cachedInwardDirection = inwardDirection;
+        cachedHoleDistance = distance;
+        if (chipDisplay != null)
+        {
+            var seatRect = transform as RectTransform;
+            chipDisplay.ConfigureSeatAnchor(seatRect, cachedInwardDirection, cachedHoleDistance + spacing);
+        }
         Vector2 tangent = new Vector2(-inwardDirection.y, inwardDirection.x); // перпендикуляр
 
         Vector2 pos1 = inwardDirection * distance - tangent * (spacing * 0.5f);

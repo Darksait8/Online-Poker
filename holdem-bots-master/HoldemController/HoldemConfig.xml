@@ -1,0 +1,23 @@
+<HoldemConfig>
+  <GameRules smallBlind="125" 
+             bigBlind="250" 
+             startingStack="100000"
+             maxNumRaisesPerBettingRound="-1"
+             maxHands="-1"
+             doubleBlindFrequency="19" 
+             botTimeOutMilliSeconds ="5000"
+             randomDealer="true" 
+             randomSeating="true"
+             pauseAfterEachHand="false"
+             sleepAfterActionMilliSeconds="0"
+             graphicsDisplay="false"
+             />
+  <Players>
+    <Player dll="BetterBot.dll" />
+    <Player dll="CallerBot.dll" />
+    <Player dll="GMachine.dll" />
+    <Player dll="RandomBot.dll" />
+    <Player dll="SmartBot.dll" />
+    <Player dll="ObserverBot.dll" trusted="true" />
+  </Players>
+</HoldemConfig>

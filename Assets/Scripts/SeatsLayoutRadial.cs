@@ -43,7 +43,7 @@ public class SeatsLayoutRadial : MonoBehaviour
             if (configMaxSeats >= 2 && configMaxSeats <= 9)
             {
                 maxSeats = configMaxSeats;
-                Debug.Log($"SeatsLayoutRadial: Используем maxSeats из TableRuntimeConfig = {maxSeats}");
+            Debug.Log($"SeatsLayoutRadial: Используем maxSeats из TableRuntimeConfig = {maxSeats}");
             }
             else
             {

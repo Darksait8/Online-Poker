@@ -21,6 +21,8 @@ public class UnifiedPlayerManager : MonoBehaviour
     [SerializeField] private BoardController boardController;
     private bool isManaging = false;
     
+    public int DefaultStack => defaultStack;
+    
     private void Awake()
     {
         // Находим SeatsLayoutRadial
@@ -143,6 +145,15 @@ public class UnifiedPlayerManager : MonoBehaviour
             if (enableDebugLogs)
                 Debug.Log("UnifiedPlayerManager: Отключил TableConfigTester");
         }
+
+        // Отключаем устаревший GameStateMachine
+        var legacyStateMachine = FindObjectOfType<GameStateMachine>();
+        if (legacyStateMachine != null)
+        {
+            legacyStateMachine.enabled = false;
+            if (enableDebugLogs)
+                Debug.Log("UnifiedPlayerManager: Отключил GameStateMachine");
+        }
     }
     
     [ContextMenu("Manage Players")]
@@ -190,8 +201,8 @@ public class UnifiedPlayerManager : MonoBehaviour
                 AddPlayers(playersToManage);
             }
             
-            // 4. Запускаем раздачу карт
-            StartCardDealing();
+            // 4. Запускаем актуальную игровую логику
+            NotifyGameManager();
             
             if (enableDebugLogs)
                 Debug.Log($"=== УПРАВЛЕНИЕ ЗАВЕРШЕНО: {playersToManage} игроков ===");
@@ -298,22 +309,7 @@ public class UnifiedPlayerManager : MonoBehaviour
     
     private void StartCardDealing()
     {
-        if (enableDebugLogs)
-            Debug.Log("UnifiedPlayerManager: Запускаем раздачу карт");
-        
-        // Находим GameStateMachine и запускаем раздачу
-        var gameStateMachine = FindObjectOfType<GameStateMachine>();
-        if (gameStateMachine != null)
-        {
-            gameStateMachine.StartHand();
-            if (enableDebugLogs)
-                Debug.Log("UnifiedPlayerManager: GameStateMachine.StartHand() вызван");
-        }
-        else
-        {
-            // Если GameStateMachine не найден, раздаем карты напрямую
-            DealCardsDirectly();
-        }
+        NotifyGameManager();
     }
     
     private void DealCardsDirectly()
@@ -402,5 +398,33 @@ public class UnifiedPlayerManager : MonoBehaviour
             }
         }
         return true;
+    }
+
+    private void NotifyGameManager()
+    {
+        StartCoroutine(WaitForGameManagerAndStart());
+    }
+
+    private System.Collections.IEnumerator WaitForGameManagerAndStart()
+    {
+        int attempts = 0;
+        GameManager gm = null;
+        while (gm == null)
+        {
+            gm = FindObjectOfType<GameManager>();
+            if (gm != null)
+                break;
+
+            attempts++;
+            if (attempts % 60 == 0 && enableDebugLogs)
+                Debug.Log("UnifiedPlayerManager: ожидаю появления GameManager...");
+
+            yield return null;
+        }
+
+        if (enableDebugLogs)
+            Debug.Log("UnifiedPlayerManager: GameManager найден, запускаем новую раздачу");
+
+        gm.RebuildPlayersAndStart();
     }
 }
