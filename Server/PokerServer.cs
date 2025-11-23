@@ -328,6 +328,10 @@ namespace PokerServer
             }
             
             // Обновляем данные пользователя
+            int oldChips = user.Chips;
+            int oldXP = user.XP;
+            int oldLevel = user.Level;
+            
             if (data.ContainsKey("chips"))
                 user.Chips = Convert.ToInt32(data["chips"]);
             if (data.ContainsKey("xp"))
@@ -335,7 +339,21 @@ namespace PokerServer
             if (data.ContainsKey("level"))
                 user.Level = Convert.ToInt32(data["level"]);
             
+            Console.WriteLine($"📝 Обновление профиля {username}:");
+            Console.WriteLine($"   - Фишки: {oldChips} -> {user.Chips}");
+            Console.WriteLine($"   - XP: {oldXP} -> {user.XP}");
+            Console.WriteLine($"   - Уровень: {oldLevel} -> {user.Level}");
+            
             bool updated = userDatabase.UpdateUser(user);
+            
+            if (updated)
+            {
+                Console.WriteLine($"✅ Профиль {username} успешно обновлен на сервере");
+            }
+            else
+            {
+                Console.WriteLine($"❌ Ошибка обновления профиля {username}");
+            }
             
             var response = new Dictionary<string, object>
             {

@@ -22,20 +22,8 @@
     "XP": 0,
     "Level": 1,
     "Friends": [],
-    "IncomingFriendRequests": [
-      {
-        "From": "artem",
-        "To": "igor",
-        "CreatedAt": "2025-11-24T00:59:01.0308039+03:00"
-      }
-    ],
-    "OutgoingFriendRequests": [
-      {
-        "From": "igor",
-        "To": "artem",
-        "CreatedAt": "2025-11-24T00:59:16.6688681+03:00"
-      }
-    ]
+    "IncomingFriendRequests": [],
+    "OutgoingFriendRequests": []
   },
   "artem": {
     "Username": "artem",
@@ -43,23 +31,11 @@
     "PasswordHash": "jZae727K08KaOmKSgOaGzww/XVqGr/PKEgIMkjrcbJI=",
     "RegistrationDate": "2025-11-23T17:29:57.2182059+03:00",
     "LastLoginDate": "2025-11-24T00:12:13.2271937+03:00",
-    "Chips": 1000,
+    "Chips": 1663,
     "XP": 0,
     "Level": 1,
     "Friends": [],
-    "IncomingFriendRequests": [
-      {
-        "From": "igor",
-        "To": "artem",
-        "CreatedAt": "2025-11-24T00:59:16.6688681+03:00"
-      }
-    ],
-    "OutgoingFriendRequests": [
-      {
-        "From": "artem",
-        "To": "igor",
-        "CreatedAt": "2025-11-24T00:59:01.0308039+03:00"
-      }
-    ]
+    "IncomingFriendRequests": [],
+    "OutgoingFriendRequests": []
   }
 }

@@ -288,8 +288,28 @@ public static class AuthManager
     {
         if (_currentUser != null)
         {
+            int oldBalance = _currentUser.chips;
             _currentUser.chips = Mathf.Max(0, newBalance);
             SaveCurrentUser();
+            
+            Debug.Log($"AuthManager: Баланс обновлен {oldBalance} -> {newBalance}");
+            
+            // Синхронизируем с сервером, если используется серверная авторизация
+            AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
+            if (authSync != null)
+            {
+                var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                bool useServerAuth = useServerAuthField != null && 
+                                    (bool)(useServerAuthField.GetValue(authSync) ?? false);
+                
+                if (useServerAuth)
+                {
+                    Debug.Log($"AuthManager: Синхронизирую баланс {newBalance} с сервером...");
+                    authSync.SyncProfileToServer(_currentUser);
+                }
+            }
+            
             OnUserProfileChanged?.Invoke(_currentUser);
         }
     }
