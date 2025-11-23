@@ -19,12 +19,14 @@ namespace PokerServer
         private GameSession currentSession;
         private bool isRunning = false;
         private readonly object clientsLock = new object();
+        private UserDatabase userDatabase;
         
         private int port;
         
         public PokerServer(int port = 8888)
         {
             this.port = port;
+            this.userDatabase = new UserDatabase("users.json");
         }
         
         public void Start()
@@ -37,6 +39,10 @@ namespace PokerServer
                 
                 Console.WriteLine($"🎮 Покерный сервер запущен на порту {port}");
                 Console.WriteLine("Ожидание подключений...");
+                Console.WriteLine();
+                Console.WriteLine("📡 Доступные IP-адреса для подключения:");
+                PrintLocalIPAddresses();
+                Console.WriteLine();
                 
                 Task.Run(AcceptClients);
             }
@@ -120,6 +126,132 @@ namespace PokerServer
                     }
                 }
             }
+        }
+        
+        public void HandleAuthRegister(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            string email = data.ContainsKey("email") ? data["email"].ToString() : "";
+            string password = data.ContainsKey("password") ? data["password"].ToString() : "";
+            
+            var result = userDatabase.Register(username, email, password);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "auth_register_response"},
+                {"success", result.Success},
+                {"message", result.Message}
+            };
+            
+            if (result.Success && result.User != null)
+            {
+                response["username"] = result.User.Username;
+                response["chips"] = result.User.Chips;
+                response["xp"] = result.User.XP;
+                response["level"] = result.User.Level;
+            }
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleAuthLogin(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            string password = data.ContainsKey("password") ? data["password"].ToString() : "";
+            
+            var result = userDatabase.Login(username, password);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "auth_login_response"},
+                {"success", result.Success},
+                {"message", result.Message}
+            };
+            
+            if (result.Success && result.User != null)
+            {
+                response["username"] = result.User.Username;
+                response["email"] = result.User.Email;
+                response["chips"] = result.User.Chips;
+                response["xp"] = result.User.XP;
+                response["level"] = result.User.Level;
+                response["registration_date"] = result.User.RegistrationDate.ToString("yyyy-MM-dd HH:mm:ss");
+            }
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleAuthGetProfile(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            
+            var user = userDatabase.GetUser(username);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "auth_profile_response"},
+                {"success", user != null}
+            };
+            
+            if (user != null)
+            {
+                response["username"] = user.Username;
+                response["email"] = user.Email;
+                response["chips"] = user.Chips;
+                response["xp"] = user.XP;
+                response["level"] = user.Level;
+                response["registration_date"] = user.RegistrationDate.ToString("yyyy-MM-dd HH:mm:ss");
+            }
+            else
+            {
+                response["message"] = "Пользователь не найден";
+            }
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleAuthUpdateProfile(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            
+            var user = userDatabase.GetUser(username);
+            if (user == null)
+            {
+                var errorResponse = new Dictionary<string, object>
+                {
+                    {"type", "auth_update_response"},
+                    {"success", false},
+                    {"message", "Пользователь не найден"}
+                };
+                client.SendMessage(errorResponse);
+                return;
+            }
+            
+            // Обновляем данные пользователя
+            if (data.ContainsKey("chips"))
+                user.Chips = Convert.ToInt32(data["chips"]);
+            if (data.ContainsKey("xp"))
+                user.XP = Convert.ToInt32(data["xp"]);
+            if (data.ContainsKey("level"))
+                user.Level = Convert.ToInt32(data["level"]);
+            
+            bool updated = userDatabase.UpdateUser(user);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "auth_update_response"},
+                {"success", updated},
+                {"message", updated ? "Профиль обновлен" : "Ошибка обновления"}
+            };
+            
+            if (updated)
+            {
+                response["chips"] = user.Chips;
+                response["xp"] = user.XP;
+                response["level"] = user.Level;
+            }
+            
+            client.SendMessage(response);
         }
         
         public void HandleJoinRequest(ClientConnection client, Dictionary<string, object> data)
@@ -272,6 +404,26 @@ namespace PokerServer
             }
             
             BroadcastMessage(message);
+        }
+        
+        private void PrintLocalIPAddresses()
+        {
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        Console.WriteLine($"   - {ip} (для подключения используйте этот IP)");
+                    }
+                }
+                Console.WriteLine($"   - localhost или 127.0.0.1 (только для локального подключения)");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ⚠️ Не удалось определить IP-адреса: {ex.Message}");
+            }
         }
         
         private string SerializeMessage(Dictionary<string, object> message)

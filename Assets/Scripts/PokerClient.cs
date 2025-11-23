@@ -15,6 +15,7 @@ public class PokerClient : MonoBehaviour
     [SerializeField] private int serverPort = 8888;
     [SerializeField] private string playerName = "Unity Player";
     [SerializeField] private int startingStack = 1000;
+    [SerializeField] private bool autoConnectOnStart = false; // Не подключаться автоматически
     
     [Header("Отладка")]
     [SerializeField] private bool enableDebugLogs = true;
@@ -36,7 +37,11 @@ public class PokerClient : MonoBehaviour
     
     private void Start()
     {
-        ConnectToServer();
+        // Подключаемся только если включено автоматическое подключение
+        if (autoConnectOnStart)
+        {
+            ConnectToServer();
+        }
     }
     
     private void OnDestroy()
@@ -47,30 +52,175 @@ public class PokerClient : MonoBehaviour
     [ContextMenu("Connect to Server")]
     public void ConnectToServer()
     {
+        // Проверяем, не подключены ли уже
+        if (isConnected && tcpClient != null && tcpClient.Connected)
+        {
+            Debug.LogWarning("⚠️ Уже подключен к серверу");
+            return;
+        }
+        
+        // Отключаемся перед новым подключением
+        if (tcpClient != null)
+        {
+            try
+            {
+                tcpClient.Close();
+            }
+            catch { }
+        }
+        
+        if (enableDebugLogs)
+            Debug.Log($"🔌 Попытка подключения к {serverHost}:{serverPort}...");
+        
         try
         {
             tcpClient = new TcpClient();
-            tcpClient.Connect(serverHost, serverPort);
+            
+            // Используем синхронное подключение с таймаутом
+            // Это более надежно, чем async для Unity
+            var connectResult = tcpClient.BeginConnect(serverHost, serverPort, null, null);
+            var success = connectResult.AsyncWaitHandle.WaitOne(System.TimeSpan.FromSeconds(5));
+            
+            if (!success)
+            {
+                throw new System.TimeoutException("Превышено время ожидания подключения");
+            }
+            
+            tcpClient.EndConnect(connectResult);
             stream = tcpClient.GetStream();
             isConnected = true;
             
             if (enableDebugLogs)
-                Debug.Log($"🔌 Подключен к серверу {serverHost}:{serverPort}");
+                Debug.Log($"✅ Подключен к серверу {serverHost}:{serverPort}");
             
             OnConnectionStatusChanged?.Invoke("Подключен");
             
             // Запускаем поток для получения сообщений
             receiveThread = new Thread(ReceiveMessages);
+            receiveThread.IsBackground = true; // Фоновый поток
             receiveThread.Start();
             
             // Отправляем запрос на присоединение
             SendJoinRequest();
             
         }
+        catch (System.TimeoutException)
+        {
+            string errorMessage = $"Превышено время ожидания подключения к {serverHost}:{serverPort}.\n\n" +
+                                "Проверьте:\n" +
+                                "1. Запущен ли сервер (dotnet run в папке Server)\n" +
+                                "2. Правильный ли IP-адрес (localhost для локального сервера)\n" +
+                                "3. Не блокирует ли файрвол порт 8888";
+            Debug.LogError($"❌ Ошибка подключения: {errorMessage}");
+            OnConnectionStatusChanged?.Invoke($"Ошибка: Превышено время ожидания");
+            
+            // Закрываем соединение при ошибке
+            try { tcpClient?.Close(); } catch { }
+            isConnected = false;
+        }
+        catch (System.Net.Sockets.SocketException e)
+        {
+            string errorMessage = "";
+            
+            // Более понятные сообщения об ошибках по коду
+            if (e.ErrorCode == 10061 || e.SocketErrorCode == System.Net.Sockets.SocketError.ConnectionRefused)
+            {
+                errorMessage = $"Сервер не запущен или недоступен на {serverHost}:{serverPort}.\n\n" +
+                              "РЕШЕНИЕ:\n" +
+                              "1. Откройте терминал и выполните: cd Server && dotnet run\n" +
+                              "2. Убедитесь, что сервер показывает 'Ожидание подключений...'\n" +
+                              "3. Используйте 'localhost' если сервер на том же компьютере\n" +
+                              "4. Проверьте, что порт 8888 не занят другим приложением";
+            }
+            else if (e.ErrorCode == 10060 || e.SocketErrorCode == System.Net.Sockets.SocketError.TimedOut)
+            {
+                errorMessage = $"Превышено время ожидания подключения к {serverHost}:{serverPort}.\n\n" +
+                              "Проверьте IP-адрес и доступность сервера";
+            }
+            else if (e.ErrorCode == 10049 || e.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable)
+            {
+                errorMessage = $"Неверный IP-адрес {serverHost}:{serverPort}.\n\n" +
+                              "Используйте 'localhost' для локального сервера";
+            }
+            else
+            {
+                errorMessage = $"Ошибка подключения: {e.Message} (код: {e.ErrorCode})";
+            }
+            
+            Debug.LogError($"❌ Ошибка подключения: {errorMessage}");
+            OnConnectionStatusChanged?.Invoke($"Ошибка: Сервер недоступен");
+            
+            // Закрываем соединение при ошибке
+            try { tcpClient?.Close(); } catch { }
+            isConnected = false;
+        }
+        catch (System.AggregateException aggEx)
+        {
+            // Обрабатываем AggregateException (возникает при async операциях)
+            Exception innerEx = aggEx.GetBaseException() ?? aggEx.InnerException ?? aggEx;
+            string errorMessage = "";
+            
+            if (innerEx is System.Net.Sockets.SocketException socketEx)
+            {
+                if (socketEx.ErrorCode == 10061 || socketEx.SocketErrorCode == System.Net.Sockets.SocketError.ConnectionRefused)
+                {
+                    errorMessage = $"Сервер не запущен или недоступен на {serverHost}:{serverPort}.\n\n" +
+                                  "РЕШЕНИЕ:\n" +
+                                  "1. Откройте терминал и выполните: cd Server && dotnet run\n" +
+                                  "2. Убедитесь, что сервер показывает 'Ожидание подключений...'\n" +
+                                  "3. Используйте 'localhost' если сервер на том же компьютере\n" +
+                                  "4. Проверьте файрвол (может блокировать порт 8888)";
+                }
+                else
+                {
+                    errorMessage = $"Ошибка подключения: {socketEx.Message} (код: {socketEx.ErrorCode})";
+                }
+            }
+            else
+            {
+                errorMessage = $"Ошибка подключения: {innerEx.Message}";
+            }
+            
+            Debug.LogError($"❌ Ошибка подключения: {errorMessage}");
+            Debug.LogError($"Внутренняя ошибка: {innerEx.GetType().Name}: {innerEx.Message}");
+            OnConnectionStatusChanged?.Invoke($"Ошибка: Сервер недоступен");
+            
+            // Закрываем соединение при ошибке
+            try { tcpClient?.Close(); } catch { }
+            isConnected = false;
+        }
         catch (Exception e)
         {
-            Debug.LogError($"❌ Ошибка подключения: {e.Message}");
-            OnConnectionStatusChanged?.Invoke($"Ошибка: {e.Message}");
+            // Извлекаем внутреннее исключение если есть
+            Exception innerEx = e;
+            if (e is System.AggregateException aggEx)
+            {
+                innerEx = aggEx.GetBaseException() ?? aggEx.InnerException ?? aggEx;
+            }
+            
+            string errorMessage = $"Ошибка подключения к {serverHost}:{serverPort}.\n" +
+                                $"Тип: {innerEx.GetType().Name}\n" +
+                                $"Сообщение: {innerEx.Message}";
+            
+            // Проверяем, не является ли это ошибкой подключения
+            if (innerEx.Message.Contains("отверг запрос") || 
+                innerEx.Message.Contains("connection refused") ||
+                innerEx.Message.Contains("Connection refused"))
+            {
+                errorMessage = $"Сервер не запущен или недоступен на {serverHost}:{serverPort}.\n\n" +
+                              "РЕШЕНИЕ:\n" +
+                              "1. Запустите сервер: cd Server && dotnet run\n" +
+                              "2. Убедитесь, что сервер работает (должно быть 'Ожидание подключений...')\n" +
+                              "3. Используйте 'localhost' для локального сервера\n" +
+                              "4. Проверьте файрвол";
+            }
+            
+            Debug.LogError($"❌ Ошибка подключения: {errorMessage}");
+            OnConnectionStatusChanged?.Invoke($"Ошибка: Не удалось подключиться");
+            
+            // Закрываем соединение при ошибке
+            try { tcpClient?.Close(); } catch { }
+            isConnected = false;
         }
     }
     

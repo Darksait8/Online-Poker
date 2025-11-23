@@ -211,6 +211,22 @@ public static class AuthManager
     }
     
     /// <summary>
+    /// Устанавливает текущего пользователя (для использования с серверной синхронизацией)
+    /// </summary>
+    public static void SetCurrentUser(UserProfile user)
+    {
+        _currentUser = user;
+        if (user != null)
+        {
+            EnsureSocialCollections(_currentUser);
+            EnsureCardThemeApplied(_currentUser.gameSettings);
+            OnUserLoggedIn?.Invoke(_currentUser);
+            OnUserProfileChanged?.Invoke(_currentUser);
+            NotifySocialChanged();
+        }
+    }
+    
+    /// <summary>
     /// Сохраняет текущего пользователя
     /// </summary>
     public static void SaveCurrentUser()

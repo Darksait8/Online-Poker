@@ -15,6 +15,7 @@ public class PokerClientFull : MonoBehaviour
     [SerializeField] private int serverPort = 8888;
     [SerializeField] private string playerName = "Unity Player";
     [SerializeField] private int startingStack = 1000;
+    [SerializeField] private bool autoConnectOnStart = false; // Не подключаться автоматически
     
     [Header("Отладка")]
     [SerializeField] private bool enableDebugLogs = true;
@@ -39,7 +40,11 @@ public class PokerClientFull : MonoBehaviour
     
     private void Start()
     {
-        ConnectToServer();
+        // Подключаемся только если включено автоматическое подключение
+        if (autoConnectOnStart)
+        {
+            ConnectToServer();
+        }
     }
     
     private void OnDestroy()

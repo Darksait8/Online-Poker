@@ -16,14 +16,27 @@ public class ConnectionManager : MonoBehaviour
     [Header("Кнопки")]
     [SerializeField] private Button connectButton;
     [SerializeField] private Button disconnectButton;
+    [SerializeField] private Button autoFillButton; // Кнопка для ручного автозаполнения
     
     [Header("Ссылки")]
     [SerializeField] private PokerClient pokerClient;
+    
+    [Header("Панель подключения")]
+    [SerializeField] private GameObject connectionPanel; // Панель, которую нужно скрывать/показывать
+    [SerializeField] private bool hidePanelOnConnect = true; // Скрывать панель при подключении
+    [SerializeField] private bool showPanelOnDisconnect = true; // Показывать панель при отключении
+    
+    [Header("Автозаполнение")]
+    [SerializeField] private bool autoFillOnStart = true; // Автоматически заполнять поля при старте
+    [SerializeField] private bool useLocalIP = false; // Использовать локальный IP вместо localhost
     
     private void Start()
     {
         // Загружаем сохраненные настройки
         LoadSettings();
+        
+        // Синхронизируем адрес сервера с AuthServerSync
+        SyncServerAddressWithAuth();
         
         // Настраиваем кнопки
         if (connectButton != null)
@@ -32,30 +45,271 @@ public class ConnectionManager : MonoBehaviour
         if (disconnectButton != null)
             disconnectButton.onClick.AddListener(DisconnectFromServer);
         
+        if (autoFillButton != null)
+            autoFillButton.onClick.AddListener(AutoFillFields);
+        
+        // Подписываемся на события подключения
+        if (pokerClient != null)
+        {
+            pokerClient.OnConnectionStatusChanged += HandleConnectionStatusChanged;
+        }
+        
         // Обновляем состояние кнопок
         UpdateButtonStates();
+        
+        // Находим панель автоматически, если не назначена
+        if (connectionPanel == null)
+        {
+            FindConnectionPanel();
+        }
+        
+        // Автозаполнение полей при старте
+        if (autoFillOnStart)
+        {
+            AutoFillFields();
+        }
+    }
+    
+    /// <summary>
+    /// Автоматически заполняет поля подключения умными значениями
+    /// </summary>
+    public void AutoFillFields()
+    {
+        bool changed = false;
+        
+        // Автозаполнение IP-адреса (всегда заполняем, если пусто)
+        if (serverHostInput != null)
+        {
+            if (string.IsNullOrEmpty(serverHostInput.text.Trim()))
+            {
+                if (useLocalIP)
+                {
+                    string localIP = ServerDiscoveryHelper.GetLocalIPAddress();
+                    if (localIP != "localhost" && !string.IsNullOrEmpty(localIP))
+                    {
+                        serverHostInput.text = localIP;
+                        changed = true;
+                    }
+                    else
+                    {
+                        serverHostInput.text = "localhost";
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    serverHostInput.text = "localhost";
+                    changed = true;
+                }
+            }
+        }
+        
+        // Автозаполнение порта (всегда заполняем, если пусто)
+        if (serverPortInput != null)
+        {
+            if (string.IsNullOrEmpty(serverPortInput.text.Trim()))
+            {
+                serverPortInput.text = "8888";
+                changed = true;
+            }
+        }
+        
+        // Автозаполнение имени игрока (всегда заполняем, если пусто)
+        if (playerNameInput != null)
+        {
+            if (string.IsNullOrEmpty(playerNameInput.text.Trim()))
+            {
+                var currentUser = AuthManager.CurrentUser;
+                if (currentUser != null && !string.IsNullOrEmpty(currentUser.username))
+                {
+                    playerNameInput.text = currentUser.username;
+                }
+                else
+                {
+                    playerNameInput.text = "Игрок";
+                }
+                changed = true;
+            }
+        }
+        
+        // Автозаполнение начального стека (всегда заполняем, если пусто)
+        if (startingStackInput != null)
+        {
+            if (string.IsNullOrEmpty(startingStackInput.text.Trim()))
+            {
+                var currentUser = AuthManager.CurrentUser;
+                if (currentUser != null && currentUser.chips > 0)
+                {
+                    startingStackInput.text = currentUser.chips.ToString();
+                }
+                else
+                {
+                    startingStackInput.text = "1000";
+                }
+                changed = true;
+            }
+        }
+        
+        // Сохраняем изменения
+        if (changed)
+        {
+            SaveSettings();
+            UpdateClientSettings();
+            Debug.Log("✅ Поля подключения автоматически заполнены");
+        }
+    }
+    
+    private void OnDestroy()
+    {
+        // Отписываемся от событий
+        if (pokerClient != null)
+        {
+            pokerClient.OnConnectionStatusChanged -= HandleConnectionStatusChanged;
+        }
+    }
+    
+    private void FindConnectionPanel()
+    {
+        // Пытаемся найти панель по имени
+        GameObject foundPanel = GameObject.Find("ConnectionPanel");
+        if (foundPanel == null)
+        {
+            // Ищем родительский объект с полями ввода
+            if (serverHostInput != null)
+            {
+                Transform parent = serverHostInput.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("Panel") || parent.name.Contains("Connection"))
+                    {
+                        connectionPanel = parent.gameObject;
+                        break;
+                    }
+                    parent = parent.parent;
+                }
+            }
+        }
+        else
+        {
+            connectionPanel = foundPanel;
+        }
+    }
+    
+    private void HandleConnectionStatusChanged(string status)
+    {
+        // Обновляем состояние кнопок
+        UpdateButtonStates();
+        
+        // Управляем видимостью панели
+        if (connectionPanel != null)
+        {
+            if (status.Contains("Подключен") && hidePanelOnConnect)
+            {
+                // Скрываем панель при успешном подключении
+                connectionPanel.SetActive(false);
+                Debug.Log("✅ Панель подключения скрыта после успешного подключения");
+            }
+            else if ((status.Contains("Отключен") || status.Contains("Ошибка")) && showPanelOnDisconnect)
+            {
+                // Показываем панель при отключении или ошибке
+                connectionPanel.SetActive(true);
+            }
+        }
     }
     
     private void LoadSettings()
     {
-        // Загружаем настройки из PlayerPrefs
-        string savedHost = PlayerPrefs.GetString("ServerHost", "localhost");
+        // Загружаем настройки из PlayerPrefs или используем умные значения по умолчанию
+        string savedHost = PlayerPrefs.GetString("ServerHost", "");
         int savedPort = PlayerPrefs.GetInt("ServerPort", 8888);
-        string savedName = PlayerPrefs.GetString("PlayerName", "Unity Player");
+        string savedName = PlayerPrefs.GetString("PlayerName", "");
         int savedStack = PlayerPrefs.GetInt("StartingStack", 1000);
         
-        // Устанавливаем значения в поля ввода
+        // Автозаполнение IP-адреса
         if (serverHostInput != null)
-            serverHostInput.text = savedHost;
-            
+        {
+            if (string.IsNullOrEmpty(savedHost))
+            {
+                // Используем умное значение по умолчанию
+                if (useLocalIP)
+                {
+                    // Пытаемся определить локальный IP
+                    string localIP = ServerDiscoveryHelper.GetLocalIPAddress();
+                    if (localIP != "localhost" && !string.IsNullOrEmpty(localIP))
+                    {
+                        serverHostInput.text = localIP;
+                    }
+                    else
+                    {
+                        serverHostInput.text = "localhost";
+                    }
+                }
+                else
+                {
+                    serverHostInput.text = "localhost";
+                }
+            }
+            else
+            {
+                serverHostInput.text = savedHost;
+            }
+        }
+        
+        // Автозаполнение порта
         if (serverPortInput != null)
+        {
             serverPortInput.text = savedPort.ToString();
-            
+        }
+        
+        // Автозаполнение имени игрока
         if (playerNameInput != null)
-            playerNameInput.text = savedName;
-            
+        {
+            if (string.IsNullOrEmpty(savedName))
+            {
+                // Пытаемся взять имя из профиля
+                var currentUser = AuthManager.CurrentUser;
+                if (currentUser != null && !string.IsNullOrEmpty(currentUser.username))
+                {
+                    playerNameInput.text = currentUser.username;
+                }
+                else
+                {
+                    playerNameInput.text = "Игрок";
+                }
+            }
+            else
+            {
+                playerNameInput.text = savedName;
+            }
+        }
+        
+        // Автозаполнение начального стека
         if (startingStackInput != null)
-            startingStackInput.text = savedStack.ToString();
+        {
+            if (savedStack <= 0)
+            {
+                // Пытаемся взять баланс из профиля
+                var currentUser = AuthManager.CurrentUser;
+                if (currentUser != null && currentUser.chips > 0)
+                {
+                    startingStackInput.text = currentUser.chips.ToString();
+                }
+                else
+                {
+                    startingStackInput.text = "1000";
+                }
+            }
+            else
+            {
+                startingStackInput.text = savedStack.ToString();
+            }
+        }
+        
+        // Сохраняем автозаполненные значения
+        if (autoFillOnStart)
+        {
+            SaveSettings();
+        }
     }
     
     private void SaveSettings()
@@ -90,11 +344,23 @@ public class ConnectionManager : MonoBehaviour
         // Обновляем настройки клиента
         UpdateClientSettings();
         
+        // Проверяем, что поля заполнены
+        string host = GetServerHost();
+        int port = GetServerPort();
+        
+        if (string.IsNullOrEmpty(host))
+        {
+            Debug.LogError("❌ IP-адрес сервера не указан!");
+            return;
+        }
+        
+        Debug.Log($"🔌 Попытка подключения к серверу {host}:{port}...");
+        
         // Подключаемся к серверу
         pokerClient.ConnectToServer();
         
-        // Обновляем состояние кнопок
-        UpdateButtonStates();
+        // Обновляем состояние кнопок через небольшую задержку
+        Invoke(nameof(UpdateButtonStates), 0.5f);
     }
     
     public void DisconnectFromServer()
@@ -104,8 +370,36 @@ public class ConnectionManager : MonoBehaviour
             pokerClient.DisconnectFromServer();
         }
         
+        // Показываем панель при отключении
+        if (connectionPanel != null && showPanelOnDisconnect)
+        {
+            connectionPanel.SetActive(true);
+        }
+        
         // Обновляем состояние кнопок
         UpdateButtonStates();
+    }
+    
+    /// <summary>
+    /// Показывает панель подключения
+    /// </summary>
+    public void ShowConnectionPanel()
+    {
+        if (connectionPanel != null)
+        {
+            connectionPanel.SetActive(true);
+        }
+    }
+    
+    /// <summary>
+    /// Скрывает панель подключения
+    /// </summary>
+    public void HideConnectionPanel()
+    {
+        if (connectionPanel != null)
+        {
+            connectionPanel.SetActive(false);
+        }
     }
     
     private void UpdateClientSettings()
@@ -149,6 +443,20 @@ public class ConnectionManager : MonoBehaviour
             
         if (disconnectButton != null)
             disconnectButton.interactable = isConnected;
+        
+        // Управляем видимостью панели на основе состояния подключения
+        if (connectionPanel != null && hidePanelOnConnect)
+        {
+            // Скрываем панель если подключены, показываем если не подключены
+            if (isConnected)
+            {
+                connectionPanel.SetActive(false);
+            }
+            else if (showPanelOnDisconnect)
+            {
+                connectionPanel.SetActive(true);
+            }
+        }
     }
     
     private void Update()
@@ -206,5 +514,20 @@ public class ConnectionManager : MonoBehaviour
         if (serverPortInput != null && int.TryParse(serverPortInput.text, out int port))
             return port;
         return 8888;
+    }
+    
+    /// <summary>
+    /// Синхронизирует адрес сервера с AuthServerSync
+    /// </summary>
+    private void SyncServerAddressWithAuth()
+    {
+        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+        if (authSync != null)
+        {
+            string host = GetServerHost();
+            int port = GetServerPort();
+            authSync.SetServerAddress(host, port);
+            Debug.Log($"✅ Адрес сервера синхронизирован с AuthServerSync: {host}:{port}");
+        }
     }
 }

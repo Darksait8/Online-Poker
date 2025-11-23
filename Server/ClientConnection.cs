@@ -66,6 +66,22 @@ namespace PokerServer
                 
                 switch (messageType)
                 {
+                    case "auth_register":
+                        server.HandleAuthRegister(this, data);
+                        break;
+                        
+                    case "auth_login":
+                        server.HandleAuthLogin(this, data);
+                        break;
+                        
+                    case "auth_get_profile":
+                        server.HandleAuthGetProfile(this, data);
+                        break;
+                        
+                    case "auth_update_profile":
+                        server.HandleAuthUpdateProfile(this, data);
+                        break;
+                        
                     case "join":
                         server.HandleJoinRequest(this, data);
                         break;
