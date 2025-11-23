@@ -23,10 +23,10 @@ namespace PokerServer
         
         private int port;
         
-        public PokerServer(int port = 8888)
+        public PokerServer(int port = 8888, bool enableCloudSync = false)
         {
             this.port = port;
-            this.userDatabase = new UserDatabase("users.json");
+            this.userDatabase = new UserDatabase("users.json", enableCloudSync);
         }
         
         public void Start()

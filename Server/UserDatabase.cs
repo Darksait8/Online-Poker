@@ -15,11 +15,56 @@ namespace PokerServer
         private Dictionary<string, UserData> users = new Dictionary<string, UserData>();
         private readonly object usersLock = new object();
         private string dataFilePath;
+        private CloudSyncService cloudSync;
+        private bool syncEnabled;
         
-        public UserDatabase(string dataFilePath = "users.json")
+        public UserDatabase(string dataFilePath = "users.json", bool enableCloudSync = false)
         {
             this.dataFilePath = dataFilePath;
+            this.syncEnabled = enableCloudSync;
+            
+            if (syncEnabled)
+            {
+                cloudSync = new CloudSyncService();
+            }
+            
             LoadUsers();
+            
+            // Синхронизируем с облаком при загрузке, если включено
+            if (syncEnabled && cloudSync != null)
+            {
+                _ = SyncWithCloudAsync();
+            }
+        }
+        
+        /// <summary>
+        /// Асинхронная синхронизация с облаком
+        /// </summary>
+        private async System.Threading.Tasks.Task SyncWithCloudAsync()
+        {
+            try
+            {
+                lock (usersLock)
+                {
+                    var usersCopy = new Dictionary<string, UserData>(users);
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        var syncedUsers = await cloudSync.SyncUsers(usersCopy);
+                        if (syncedUsers != null && syncedUsers.Count > 0)
+                        {
+                            lock (usersLock)
+                            {
+                                users = syncedUsers;
+                                SaveUsers();
+                            }
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Ошибка асинхронной синхронизации: {ex.Message}");
+            }
         }
         
         /// <summary>
@@ -58,6 +103,15 @@ namespace PokerServer
                 users[username.ToLower()] = user;
                 SaveUsers();
                 
+                // Синхронизируем с облаком, если включено
+                if (syncEnabled && cloudSync != null)
+                {
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        await cloudSync.SaveToCloud(users);
+                    });
+                }
+                
                 Console.WriteLine($"✅ Зарегистрирован новый пользователь: {username}");
                 return new RegisterResult { Success = true, Message = "Регистрация успешна", User = user };
             }
@@ -88,6 +142,15 @@ namespace PokerServer
                 
                 user.LastLoginDate = DateTime.Now;
                 SaveUsers();
+                
+                // Синхронизируем с облаком, если включено
+                if (syncEnabled && cloudSync != null)
+                {
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        await cloudSync.SaveToCloud(users);
+                    });
+                }
                 
                 Console.WriteLine($"✅ Пользователь вошел в систему: {username}");
                 return new LoginResult { Success = true, Message = "Вход выполнен успешно", User = user };
@@ -124,6 +187,16 @@ namespace PokerServer
                 {
                     users[key] = user;
                     SaveUsers();
+                    
+                    // Синхронизируем с облаком, если включено
+                    if (syncEnabled && cloudSync != null)
+                    {
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            await cloudSync.SaveToCloud(users);
+                        });
+                    }
+                    
                     return true;
                 }
             }

@@ -252,11 +252,30 @@ public class PokerClient : MonoBehaviour
     
     private void SendJoinRequest()
     {
+        // Используем имя из авторизованного пользователя, если доступно
+        string nameToUse = playerName;
+        int stackToUse = startingStack;
+        
+        // Пытаемся получить имя и баланс из авторизованного пользователя
+        if (AuthManager.IsLoggedIn && AuthManager.CurrentUser != null)
+        {
+            nameToUse = AuthManager.CurrentUser.username;
+            stackToUse = AuthManager.CurrentUser.chips;
+            
+            if (enableDebugLogs)
+                Debug.Log($"✅ Используется имя авторизованного пользователя: {nameToUse}, баланс: {stackToUse}");
+        }
+        else
+        {
+            if (enableDebugLogs)
+                Debug.LogWarning($"⚠️ Пользователь не авторизован, используется имя из настроек: {nameToUse}");
+        }
+        
         var message = new Dictionary<string, object>
         {
             {"type", "join"},
-            {"name", playerName},
-            {"stack", startingStack}
+            {"name", nameToUse},
+            {"stack", stackToUse}
         };
         
         SendMessage(message);

@@ -225,6 +225,14 @@ public class ConnectionManager : MonoBehaviour
         string savedName = PlayerPrefs.GetString("PlayerName", "");
         int savedStack = PlayerPrefs.GetInt("StartingStack", 1000);
         
+        // Если пользователь авторизован, используем его имя и баланс
+        if (AuthManager.IsLoggedIn && AuthManager.CurrentUser != null)
+        {
+            savedName = AuthManager.CurrentUser.username;
+            savedStack = AuthManager.CurrentUser.chips;
+            Debug.Log($"✅ Загружены настройки из профиля пользователя: {savedName}, баланс: {savedStack}");
+        }
+        
         // Автозаполнение IP-адреса
         if (serverHostInput != null)
         {
@@ -421,17 +429,29 @@ public class ConnectionManager : MonoBehaviour
             portField?.SetValue(pokerClient, port);
         }
         
+        // Используем имя и баланс из авторизованного пользователя, если доступно
+        string nameToUse = playerNameInput != null ? playerNameInput.text : "Игрок";
+        int stackToUse = 1000;
+        
+        if (AuthManager.IsLoggedIn && AuthManager.CurrentUser != null)
+        {
+            nameToUse = AuthManager.CurrentUser.username;
+            stackToUse = AuthManager.CurrentUser.chips;
+            Debug.Log($"✅ Используются данные авторизованного пользователя для подключения: {nameToUse}, баланс: {stackToUse}");
+        }
+        else if (startingStackInput != null && int.TryParse(startingStackInput.text, out int parsedStack))
+        {
+            stackToUse = parsedStack;
+        }
+        
         if (playerNameInput != null)
         {
             var nameField = clientType.GetField("playerName", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            nameField?.SetValue(pokerClient, playerNameInput.text);
+            nameField?.SetValue(pokerClient, nameToUse);
         }
         
-        if (startingStackInput != null && int.TryParse(startingStackInput.text, out int stack))
-        {
-            var stackField = clientType.GetField("startingStack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            stackField?.SetValue(pokerClient, stack);
-        }
+        var stackField = clientType.GetField("startingStack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        stackField?.SetValue(pokerClient, stackToUse);
     }
     
     private void UpdateButtonStates()
