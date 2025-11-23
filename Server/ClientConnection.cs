@@ -103,6 +103,9 @@ namespace PokerServer
                     case "friend_get_data":
                         server.HandleFriendGetData(this, data);
                         break;
+                    case "register_for_notifications":
+                        server.HandleRegisterForNotifications(this, data);
+                        break;
                         
                     case "join":
                         server.HandleJoinRequest(this, data);
