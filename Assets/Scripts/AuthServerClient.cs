@@ -231,6 +231,95 @@ public class AuthServerClient : MonoBehaviour
         SendMessage(message);
     }
     
+    /// <summary>
+    /// Отправка заявки в друзья
+    /// </summary>
+    public void SendFriendRequest(string fromUsername, string toUsername)
+    {
+        if (!EnsureConnected())
+            return;
+        
+        var message = new Dictionary<string, object>
+        {
+            {"type", "friend_send_request"},
+            {"from", fromUsername},
+            {"to", toUsername}
+        };
+        
+        SendMessage(message);
+    }
+    
+    /// <summary>
+    /// Принятие заявки в друзья
+    /// </summary>
+    public void AcceptFriendRequest(string username, string requesterUsername)
+    {
+        if (!EnsureConnected())
+            return;
+        
+        var message = new Dictionary<string, object>
+        {
+            {"type", "friend_accept_request"},
+            {"username", username},
+            {"requester", requesterUsername}
+        };
+        
+        SendMessage(message);
+    }
+    
+    /// <summary>
+    /// Отклонение заявки в друзья
+    /// </summary>
+    public void DeclineFriendRequest(string username, string requesterUsername)
+    {
+        if (!EnsureConnected())
+            return;
+        
+        var message = new Dictionary<string, object>
+        {
+            {"type", "friend_decline_request"},
+            {"username", username},
+            {"requester", requesterUsername}
+        };
+        
+        SendMessage(message);
+    }
+    
+    /// <summary>
+    /// Отмена отправленной заявки
+    /// </summary>
+    public void CancelFriendRequest(string fromUsername, string toUsername)
+    {
+        if (!EnsureConnected())
+            return;
+        
+        var message = new Dictionary<string, object>
+        {
+            {"type", "friend_cancel_request"},
+            {"from", fromUsername},
+            {"to", toUsername}
+        };
+        
+        SendMessage(message);
+    }
+    
+    /// <summary>
+    /// Получение данных о друзьях и заявках
+    /// </summary>
+    public void GetFriendData(string username)
+    {
+        if (!EnsureConnected())
+            return;
+        
+        var message = new Dictionary<string, object>
+        {
+            {"type", "friend_get_data"},
+            {"username", username}
+        };
+        
+        SendMessage(message);
+    }
+    
     private bool EnsureConnected()
     {
         if (!isConnected || tcpClient == null || !tcpClient.Connected)

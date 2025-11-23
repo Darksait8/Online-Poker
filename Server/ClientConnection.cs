@@ -85,6 +85,24 @@ namespace PokerServer
                     case "auth_get_all_users":
                         server.HandleAuthGetAllUsers(this, data);
                         break;
+                    case "friend_send_request":
+                        server.HandleFriendSendRequest(this, data);
+                        break;
+                    case "friend_accept_request":
+                        server.HandleFriendAcceptRequest(this, data);
+                        break;
+                    case "friend_decline_request":
+                        server.HandleFriendDeclineRequest(this, data);
+                        break;
+                    case "friend_cancel_request":
+                        server.HandleFriendCancelRequest(this, data);
+                        break;
+                    case "friend_remove":
+                        server.HandleFriendRemove(this, data);
+                        break;
+                    case "friend_get_data":
+                        server.HandleFriendGetData(this, data);
+                        break;
                         
                     case "join":
                         server.HandleJoinRequest(this, data);

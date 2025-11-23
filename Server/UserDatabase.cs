@@ -157,6 +157,217 @@ namespace PokerServer
         }
         
         /// <summary>
+        /// Отправка заявки в друзья
+        /// </summary>
+        public bool SendFriendRequest(string fromUsername, string toUsername, out string error)
+        {
+            error = string.Empty;
+            lock (usersLock)
+            {
+                if (!users.ContainsKey(fromUsername.ToLower()) || !users.ContainsKey(toUsername.ToLower()))
+                {
+                    error = "Пользователь не найден";
+                    return false;
+                }
+                
+                var fromUser = users[fromUsername.ToLower()];
+                var toUser = users[toUsername.ToLower()];
+                
+                // Инициализируем списки, если они null
+                if (fromUser.Friends == null) fromUser.Friends = new List<string>();
+                if (fromUser.OutgoingFriendRequests == null) fromUser.OutgoingFriendRequests = new List<FriendRequest>();
+                if (toUser.IncomingFriendRequests == null) toUser.IncomingFriendRequests = new List<FriendRequest>();
+                if (toUser.Friends == null) toUser.Friends = new List<string>();
+                
+                // Проверяем, не друзья ли уже
+                if (fromUser.Friends.Contains(toUsername, StringComparer.OrdinalIgnoreCase))
+                {
+                    error = "Вы уже друзья";
+                    return false;
+                }
+                
+                // Проверяем, не отправлена ли уже заявка
+                if (fromUser.OutgoingFriendRequests.Any(r => 
+                    string.Equals(r.To, toUsername, StringComparison.OrdinalIgnoreCase)))
+                {
+                    error = "Заявка уже отправлена";
+                    return false;
+                }
+                
+                // Создаем заявку
+                var request = new FriendRequest
+                {
+                    From = fromUsername,
+                    To = toUsername,
+                    CreatedAt = DateTime.Now
+                };
+                
+                fromUser.OutgoingFriendRequests.Add(request);
+                toUser.IncomingFriendRequests.Add(request);
+                
+                SaveUsers();
+                return true;
+            }
+        }
+        
+        /// <summary>
+        /// Принятие заявки в друзья
+        /// </summary>
+        public bool AcceptFriendRequest(string username, string requesterUsername, out string error)
+        {
+            error = string.Empty;
+            lock (usersLock)
+            {
+                if (!users.ContainsKey(username.ToLower()) || !users.ContainsKey(requesterUsername.ToLower()))
+                {
+                    error = "Пользователь не найден";
+                    return false;
+                }
+                
+                var user = users[username.ToLower()];
+                var requester = users[requesterUsername.ToLower()];
+                
+                // Инициализируем списки, если они null
+                if (user.IncomingFriendRequests == null) user.IncomingFriendRequests = new List<FriendRequest>();
+                if (user.Friends == null) user.Friends = new List<string>();
+                if (requester.OutgoingFriendRequests == null) requester.OutgoingFriendRequests = new List<FriendRequest>();
+                if (requester.Friends == null) requester.Friends = new List<string>();
+                
+                // Удаляем заявку из входящих
+                var request = user.IncomingFriendRequests.FirstOrDefault(r => 
+                    string.Equals(r.From, requesterUsername, StringComparison.OrdinalIgnoreCase));
+                
+                if (request == null)
+                {
+                    error = "Заявка не найдена";
+                    return false;
+                }
+                
+                user.IncomingFriendRequests.Remove(request);
+                requester.OutgoingFriendRequests.RemoveAll(r => 
+                    string.Equals(r.To, username, StringComparison.OrdinalIgnoreCase));
+                
+                // Добавляем в друзья
+                if (!user.Friends.Contains(requesterUsername, StringComparer.OrdinalIgnoreCase))
+                    user.Friends.Add(requesterUsername);
+                if (!requester.Friends.Contains(username, StringComparer.OrdinalIgnoreCase))
+                    requester.Friends.Add(username);
+                
+                SaveUsers();
+                return true;
+            }
+        }
+        
+        /// <summary>
+        /// Отклонение заявки в друзья
+        /// </summary>
+        public bool DeclineFriendRequest(string username, string requesterUsername, out string error)
+        {
+            error = string.Empty;
+            lock (usersLock)
+            {
+                if (!users.ContainsKey(username.ToLower()) || !users.ContainsKey(requesterUsername.ToLower()))
+                {
+                    error = "Пользователь не найден";
+                    return false;
+                }
+                
+                var user = users[username.ToLower()];
+                var requester = users[requesterUsername.ToLower()];
+                
+                // Инициализируем списки, если они null
+                if (user.IncomingFriendRequests == null) user.IncomingFriendRequests = new List<FriendRequest>();
+                if (requester.OutgoingFriendRequests == null) requester.OutgoingFriendRequests = new List<FriendRequest>();
+                
+                // Удаляем заявку
+                var request = user.IncomingFriendRequests.FirstOrDefault(r => 
+                    string.Equals(r.From, requesterUsername, StringComparison.OrdinalIgnoreCase));
+                
+                if (request == null)
+                {
+                    error = "Заявка не найдена";
+                    return false;
+                }
+                
+                user.IncomingFriendRequests.Remove(request);
+                requester.OutgoingFriendRequests.RemoveAll(r => 
+                    string.Equals(r.To, username, StringComparison.OrdinalIgnoreCase));
+                
+                SaveUsers();
+                return true;
+            }
+        }
+        
+        /// <summary>
+        /// Отмена отправленной заявки
+        /// </summary>
+        public bool CancelFriendRequest(string fromUsername, string toUsername, out string error)
+        {
+            error = string.Empty;
+            lock (usersLock)
+            {
+                if (!users.ContainsKey(fromUsername.ToLower()) || !users.ContainsKey(toUsername.ToLower()))
+                {
+                    error = "Пользователь не найден";
+                    return false;
+                }
+                
+                var fromUser = users[fromUsername.ToLower()];
+                var toUser = users[toUsername.ToLower()];
+                
+                // Инициализируем списки, если они null
+                if (fromUser.OutgoingFriendRequests == null) fromUser.OutgoingFriendRequests = new List<FriendRequest>();
+                if (toUser.IncomingFriendRequests == null) toUser.IncomingFriendRequests = new List<FriendRequest>();
+                
+                // Удаляем заявку
+                var request = fromUser.OutgoingFriendRequests.FirstOrDefault(r => 
+                    string.Equals(r.To, toUsername, StringComparison.OrdinalIgnoreCase));
+                
+                if (request == null)
+                {
+                    error = "Заявка не найдена";
+                    return false;
+                }
+                
+                fromUser.OutgoingFriendRequests.Remove(request);
+                toUser.IncomingFriendRequests.RemoveAll(r => 
+                    string.Equals(r.From, fromUsername, StringComparison.OrdinalIgnoreCase));
+                
+                SaveUsers();
+                return true;
+            }
+        }
+        
+        /// <summary>
+        /// Удаление из друзей
+        /// </summary>
+        public bool RemoveFriend(string username, string friendUsername, out string error)
+        {
+            error = string.Empty;
+            lock (usersLock)
+            {
+                if (!users.ContainsKey(username.ToLower()) || !users.ContainsKey(friendUsername.ToLower()))
+                {
+                    error = "Пользователь не найден";
+                    return false;
+                }
+                
+                var user = users[username.ToLower()];
+                var friend = users[friendUsername.ToLower()];
+                
+                // Инициализируем списки, если они null
+                if (user.Friends == null) user.Friends = new List<string>();
+                if (friend.Friends == null) friend.Friends = new List<string>();
+                
+                user.Friends.RemoveAll(f => string.Equals(f, friendUsername, StringComparison.OrdinalIgnoreCase));
+                friend.Friends.RemoveAll(f => string.Equals(f, username, StringComparison.OrdinalIgnoreCase));
+                
+                SaveUsers();
+                return true;
+            }
+        }
+        
+        /// <summary>
         /// Хеширование пароля
         /// </summary>
         private string HashPassword(string password)
@@ -235,6 +446,18 @@ namespace PokerServer
             public int Chips { get; set; }
             public int XP { get; set; }
             public int Level { get; set; }
+            
+            // Социальные функции
+            public List<string> Friends { get; set; } = new List<string>();
+            public List<FriendRequest> IncomingFriendRequests { get; set; } = new List<FriendRequest>();
+            public List<FriendRequest> OutgoingFriendRequests { get; set; } = new List<FriendRequest>();
+        }
+        
+        public class FriendRequest
+        {
+            public string From { get; set; }
+            public string To { get; set; }
+            public DateTime CreatedAt { get; set; }
         }
         
         public class RegisterResult

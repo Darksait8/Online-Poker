@@ -253,6 +253,34 @@ public class AuthServerSync : MonoBehaviour
                     XP = data.ContainsKey("xp") ? Convert.ToInt32(data["xp"]) : 0
                 };
                 
+                // Синхронизируем заявки в друзья с сервера
+                if (data.ContainsKey("friends"))
+                {
+                    string friendsStr = data["friends"].ToString();
+                    if (!string.IsNullOrEmpty(friendsStr))
+                    {
+                        profile.friends = new List<string>(friendsStr.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+                    }
+                }
+                
+                if (data.ContainsKey("incoming_requests"))
+                {
+                    string incomingStr = data["incoming_requests"].ToString();
+                    if (!string.IsNullOrEmpty(incomingStr))
+                    {
+                        profile.incomingFriendRequests = ParseFriendRequests(incomingStr);
+                    }
+                }
+                
+                if (data.ContainsKey("outgoing_requests"))
+                {
+                    string outgoingStr = data["outgoing_requests"].ToString();
+                    if (!string.IsNullOrEmpty(outgoingStr))
+                    {
+                        profile.outgoingFriendRequests = ParseFriendRequests(outgoingStr);
+                    }
+                }
+                
                 callback?.Invoke(profile);
             }
             else
@@ -283,6 +311,30 @@ public class AuthServerSync : MonoBehaviour
     private void HandleUpdateResponse(bool success, string message)
     {
         Debug.Log($"Обновление профиля: {(success ? "Успешно" : "Ошибка")} - {message}");
+    }
+    
+    private List<FriendRequestData> ParseFriendRequests(string requestsStr)
+    {
+        var requests = new List<FriendRequestData>();
+        if (string.IsNullOrEmpty(requestsStr))
+            return requests;
+        
+        string[] requestParts = requestsStr.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (string part in requestParts)
+        {
+            string[] fields = part.Split('|');
+            if (fields.Length >= 2)
+            {
+                requests.Add(new FriendRequestData
+                {
+                    from = fields[0],
+                    to = fields[1],
+                    createdAtTicks = fields.Length >= 3 ? DateTime.Parse(fields[2]).Ticks : DateTime.Now.Ticks
+                });
+            }
+        }
+        
+        return requests;
     }
     
     public void SetServerAddress(string host, int port)

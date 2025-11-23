@@ -237,12 +237,20 @@ namespace PokerServer
             
             if (user != null)
             {
+                // Инициализируем списки, если они null
+                if (user.Friends == null) user.Friends = new List<string>();
+                if (user.IncomingFriendRequests == null) user.IncomingFriendRequests = new List<UserDatabase.FriendRequest>();
+                if (user.OutgoingFriendRequests == null) user.OutgoingFriendRequests = new List<UserDatabase.FriendRequest>();
+                
                 response["username"] = user.Username;
                 response["email"] = user.Email;
                 response["chips"] = user.Chips;
                 response["xp"] = user.XP;
                 response["level"] = user.Level;
                 response["registration_date"] = user.RegistrationDate.ToString("yyyy-MM-dd HH:mm:ss");
+                response["friends"] = string.Join(",", user.Friends);
+                response["incoming_requests"] = SerializeFriendRequests(user.IncomingFriendRequests);
+                response["outgoing_requests"] = SerializeFriendRequests(user.OutgoingFriendRequests);
             }
             else
             {
@@ -333,6 +341,144 @@ namespace PokerServer
             
             Console.WriteLine($"📤 Отправляю ответ с {usersArray.Count} пользователями");
             client.SendMessage(response);
+        }
+        
+        public void HandleFriendSendRequest(ClientConnection client, Dictionary<string, object> data)
+        {
+            string fromUsername = data.ContainsKey("from") ? data["from"].ToString() : "";
+            string toUsername = data.ContainsKey("to") ? data["to"].ToString() : "";
+            
+            bool success = userDatabase.SendFriendRequest(fromUsername, toUsername, out string error);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "friend_send_response"},
+                {"success", success},
+                {"message", error}
+            };
+            
+            if (success)
+                Console.WriteLine($"✅ Заявка в друзья отправлена: {fromUsername} -> {toUsername}");
+            else
+                Console.WriteLine($"❌ Ошибка отправки заявки: {error}");
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleFriendAcceptRequest(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            string requesterUsername = data.ContainsKey("requester") ? data["requester"].ToString() : "";
+            
+            bool success = userDatabase.AcceptFriendRequest(username, requesterUsername, out string error);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "friend_accept_response"},
+                {"success", success},
+                {"message", error}
+            };
+            
+            if (success)
+                Console.WriteLine($"✅ Заявка в друзья принята: {username} принял заявку от {requesterUsername}");
+            else
+                Console.WriteLine($"❌ Ошибка принятия заявки: {error}");
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleFriendDeclineRequest(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            string requesterUsername = data.ContainsKey("requester") ? data["requester"].ToString() : "";
+            
+            bool success = userDatabase.DeclineFriendRequest(username, requesterUsername, out string error);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "friend_decline_response"},
+                {"success", success},
+                {"message", error}
+            };
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleFriendCancelRequest(ClientConnection client, Dictionary<string, object> data)
+        {
+            string fromUsername = data.ContainsKey("from") ? data["from"].ToString() : "";
+            string toUsername = data.ContainsKey("to") ? data["to"].ToString() : "";
+            
+            bool success = userDatabase.CancelFriendRequest(fromUsername, toUsername, out string error);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "friend_cancel_response"},
+                {"success", success},
+                {"message", error}
+            };
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleFriendRemove(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            string friendUsername = data.ContainsKey("friend") ? data["friend"].ToString() : "";
+            
+            bool success = userDatabase.RemoveFriend(username, friendUsername, out string error);
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "friend_remove_response"},
+                {"success", success},
+                {"message", error}
+            };
+            
+            client.SendMessage(response);
+        }
+        
+        public void HandleFriendGetData(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            
+            var user = userDatabase.GetUser(username);
+            if (user == null)
+            {
+                var errorResponse = new Dictionary<string, object>
+                {
+                    {"type", "friend_get_data_response"},
+                    {"success", false},
+                    {"message", "Пользователь не найден"}
+                };
+                client.SendMessage(errorResponse);
+                return;
+            }
+            
+            // Инициализируем списки, если они null
+            if (user.Friends == null) user.Friends = new List<string>();
+            if (user.IncomingFriendRequests == null) user.IncomingFriendRequests = new List<UserDatabase.FriendRequest>();
+            if (user.OutgoingFriendRequests == null) user.OutgoingFriendRequests = new List<UserDatabase.FriendRequest>();
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "friend_get_data_response"},
+                {"success", true},
+                {"friends", string.Join(",", user.Friends)},
+                {"incoming_requests", SerializeFriendRequests(user.IncomingFriendRequests)},
+                {"outgoing_requests", SerializeFriendRequests(user.OutgoingFriendRequests)}
+            };
+            
+            client.SendMessage(response);
+        }
+        
+        private string SerializeFriendRequests(List<UserDatabase.FriendRequest> requests)
+        {
+            if (requests == null || requests.Count == 0)
+                return "";
+            
+            var requestStrings = requests.Select(r => $"{r.From}|{r.To}|{r.CreatedAt:yyyy-MM-dd HH:mm:ss}").ToList();
+            return string.Join("|||", requestStrings);
         }
         
         public void HandleJoinRequest(ClientConnection client, Dictionary<string, object> data)

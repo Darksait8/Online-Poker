@@ -510,6 +510,30 @@ public static class AuthManager
             return false;
         }
 
+        // Отправляем заявку на сервер, если включена серверная авторизация
+        AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
+        if (authSync != null)
+        {
+            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            bool useServerAuth = useServerAuthField != null && 
+                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
+            
+            if (useServerAuth)
+            {
+                var authClientField = typeof(AuthServerSync).GetField("authClient", 
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
+                
+                if (authClient != null && authClient.IsConnected())
+                {
+                    // Отправляем заявку на сервер
+                    authClient.SendFriendRequest(_currentUser.username, resolvedUsername);
+                    // Заявка будет сохранена на сервере, локально тоже сохраняем для совместимости
+                }
+            }
+        }
+        
         _currentUser.outgoingFriendRequests.Add(CreateRequest(_currentUser.username, resolvedUsername));
         SaveCurrentUser();
 
