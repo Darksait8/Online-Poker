@@ -302,14 +302,41 @@ public class AuthServerSync : MonoBehaviour
                     Debug.LogWarning("AuthServerSync: Ключ 'outgoing_requests' не найден в данных логина");
                 }
                 
+                // Проверяем заявки перед сохранением
+                Debug.Log($"AuthServerSync: Перед SetCurrentUser - входящих: {profile.incomingFriendRequests?.Count ?? 0}, исходящих: {profile.outgoingFriendRequests?.Count ?? 0}");
+                if (profile.incomingFriendRequests != null && profile.incomingFriendRequests.Count > 0)
+                {
+                    foreach (var req in profile.incomingFriendRequests)
+                    {
+                        Debug.Log($"AuthServerSync: Входящая заявка: {req.from} -> {req.to}");
+                    }
+                }
+                
                 AuthManager.SetCurrentUser(profile);
                 UserDataManager.SaveUserProfile(profile);
                 
-                Debug.Log($"AuthServerSync: Профиль сохранен. Входящих заявок: {profile.incomingFriendRequests?.Count ?? 0}, Исходящих: {profile.outgoingFriendRequests?.Count ?? 0}");
+                // Проверяем заявки после SetCurrentUser
+                var currentUser = AuthManager.CurrentUser;
+                Debug.Log($"AuthServerSync: После SetCurrentUser - входящих: {currentUser?.incomingFriendRequests?.Count ?? 0}, исходящих: {currentUser?.outgoingFriendRequests?.Count ?? 0}");
+                if (currentUser != null && currentUser.incomingFriendRequests != null && currentUser.incomingFriendRequests.Count > 0)
+                {
+                    foreach (var req in currentUser.incomingFriendRequests)
+                    {
+                        Debug.Log($"AuthServerSync: Входящая заявка в CurrentUser: {req.from} -> {req.to}");
+                    }
+                }
                 
                 // Уведомляем UI об обновлении заявок
                 AuthManager.NotifySocialChanged();
                 Debug.Log("AuthServerSync: Вызван NotifySocialChanged для обновления UI");
+                
+                // Проверяем заявки через AuthManager
+                var incomingFromManager = AuthManager.GetIncomingFriendRequests();
+                Debug.Log($"AuthServerSync: GetIncomingFriendRequests вернул {incomingFromManager.Count} заявок");
+                foreach (var req in incomingFromManager)
+                {
+                    Debug.Log($"AuthServerSync: Заявка из AuthManager: {req.from} -> {req.to}");
+                }
                 
                 // Убеждаемся, что соединение остается активным для получения уведомлений
                 if (!authClient.IsConnected())
@@ -469,13 +496,27 @@ public class AuthServerSync : MonoBehaviour
                     // Убираем временную зону если есть
                     if (dateStr.Contains("+"))
                     {
-                        dateStr = dateStr.Substring(0, dateStr.IndexOf("+"));
+                        int plusIndex = dateStr.IndexOf("+");
+                        dateStr = dateStr.Substring(0, plusIndex);
+                        Debug.Log($"AuthServerSync: ParseFriendRequests - дата после удаления временной зоны: '{dateStr}'");
                     }
+                    
+                    // Пробуем разные форматы
                     if (!DateTime.TryParse(dateStr, out createdAt))
                     {
-                        Debug.LogWarning($"AuthServerSync: ParseFriendRequests - не удалось распарсить дату '{dateStr}', использую текущую");
-                        createdAt = DateTime.Now;
+                        // Пробуем формат yyyy-MM-ddTHH:mm:ss
+                        if (!DateTime.TryParseExact(dateStr, "yyyy-MM-ddTHH:mm:ss", null, System.Globalization.DateTimeStyles.None, out createdAt))
+                        {
+                            Debug.LogWarning($"AuthServerSync: ParseFriendRequests - не удалось распарсить дату '{dateStr}', использую текущую");
+                            createdAt = DateTime.Now;
+                        }
                     }
+                    
+                    Debug.Log($"AuthServerSync: ParseFriendRequests - распарсенная дата: {createdAt}");
+                }
+                else
+                {
+                    Debug.LogWarning($"AuthServerSync: ParseFriendRequests - нет третьего поля (дата), использую текущую дату");
                 }
                 
                 var request = new FriendRequestData
