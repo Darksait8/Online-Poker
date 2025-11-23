@@ -266,6 +266,32 @@ public static class AuthManager
     }
     
     /// <summary>
+    /// Обновляет баланс игрока (аналогично SetUserChips, но с другим именем для консистентности)
+    /// </summary>
+    public static void UpdatePlayerBalance(int newBalance)
+    {
+        if (_currentUser != null)
+        {
+            _currentUser.chips = Mathf.Max(0, newBalance);
+            SaveCurrentUser();
+            OnUserProfileChanged?.Invoke(_currentUser);
+        }
+    }
+    
+    /// <summary>
+    /// Добавляет XP игроку
+    /// </summary>
+    public static void AddPlayerXp(int xpAmount)
+    {
+        if (_currentUser != null && xpAmount > 0)
+        {
+            _currentUser.XP = Mathf.Max(0, _currentUser.XP + xpAmount);
+            SaveCurrentUser();
+            OnUserProfileChanged?.Invoke(_currentUser);
+        }
+    }
+    
+    /// <summary>
     /// Получает настройки игры пользователя
     /// </summary>
     public static GameSettings GetGameSettings()
@@ -808,6 +834,27 @@ public static class AuthManager
     {
         UserDataManager.ClearAllData();
         _currentUser = null;
+    }
+
+    /// <summary>
+    /// Удаляет всех пользователей кроме указанных
+    /// </summary>
+    public static int DeleteAllUsersExcept(List<string> usernamesToKeep)
+    {
+        // Если текущий пользователь будет удален, выходим из системы
+        if (_currentUser != null && usernamesToKeep != null)
+        {
+            bool currentUserWillBeKept = usernamesToKeep.Any(u => 
+                string.Equals(u, _currentUser.username, StringComparison.OrdinalIgnoreCase));
+            
+            if (!currentUserWillBeKept)
+            {
+                _currentUser = null;
+                OnUserLoggedOut?.Invoke();
+            }
+        }
+
+        return UserDataManager.DeleteAllUsersExcept(usernamesToKeep);
     }
     
     /// <summary>

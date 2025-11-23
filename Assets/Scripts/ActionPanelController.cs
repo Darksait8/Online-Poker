@@ -21,6 +21,7 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
     [Header("Совместимость")]
     [SerializeField] private GameStateMachine legacyStateMachine;
     [SerializeField] private GameManager gameManager;
+    [SerializeField] private NetworkGameManager networkGameManager;
 
     private bool panelEnabled = false;
     private DecisionRequest activeRequest;
@@ -29,6 +30,7 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
     private int callAmount;
     private int minTotalBet;
     private int maxTotalBet;
+    private int availableTokens;
     private int defaultSliderMin = 0;
     private int defaultSliderMax = 0;
 
@@ -48,6 +50,9 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
 
         if (gameManager == null)
             gameManager = FindObjectOfType<GameManager>();
+        
+        if (networkGameManager == null)
+            networkGameManager = FindObjectOfType<NetworkGameManager>();
 
         if (gameManager != null)
             gameManager.OnPhaseChanged += HandlePhaseChanged;
@@ -105,7 +110,7 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
         var table = activeRequest.Table;
 
         callAmount = Math.Max(0, table.CurrentBid - player.PlayersCurrentBet);
-        int availableTokens = player.TokensCount;
+        availableTokens = player.TokensCount;
         bool canCheck = callAmount == 0;
         bool canCall = availableTokens > 0 || canCheck;
 
@@ -139,7 +144,10 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
 
         if (betValueText != null)
         {
-            betValueText.text = canRaise ? Mathf.RoundToInt(betSlider.value).ToString() : "-";
+            if (canRaise)
+                OnSliderChanged(betSlider.value);
+            else
+                betValueText.text = "-";
         }
 
         if (foldButton != null)
@@ -192,6 +200,12 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
             return;
         }
 
+        // Отправляем действие на сервер, если онлайн-режим активен
+        if (networkGameManager != null && networkGameManager.IsOnlineModeActive())
+        {
+            networkGameManager.OnPlayerFold();
+        }
+
         CompleteDecision(new PlayerDecision(PlayerDecisionType.Fold));
     }
 
@@ -199,6 +213,19 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
     {
         if (!panelEnabled || pendingDecision == null || activeRequest == null)
             return;
+
+        // Отправляем действие на сервер, если онлайн-режим активен
+        if (networkGameManager != null && networkGameManager.IsOnlineModeActive())
+        {
+            if (callAmount <= 0)
+            {
+                networkGameManager.OnPlayerCheck();
+            }
+            else
+            {
+                networkGameManager.OnPlayerCall();
+            }
+        }
 
         if (callAmount <= 0)
         {
@@ -216,14 +243,33 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
             return;
 
         int totalBet = Mathf.RoundToInt(betSlider.value);
+        bool willAllIn = maxTotalBet > 0 && totalBet >= maxTotalBet;
         int raiseAmount = Math.Max(0, totalBet - callAmount);
-        CompleteDecision(new PlayerDecision(PlayerDecisionType.Raise, raiseAmount));
+
+        // Отправляем действие на сервер, если онлайн-режим активен
+        if (networkGameManager != null && networkGameManager.IsOnlineModeActive())
+        {
+            networkGameManager.OnPlayerRaise(totalBet);
+        }
+
+        if (willAllIn || availableTokens <= raiseAmount)
+        {
+            CompleteDecision(new PlayerDecision(PlayerDecisionType.AllIn, availableTokens));
+        }
+        else
+        {
+            CompleteDecision(new PlayerDecision(PlayerDecisionType.Raise, raiseAmount));
+        }
     }
 
     private void OnSliderChanged(float value)
     {
         if (betValueText != null)
-            betValueText.text = Mathf.RoundToInt(value).ToString();
+        {
+            int rounded = Mathf.RoundToInt(value);
+            bool willAllIn = maxTotalBet > 0 && rounded >= maxTotalBet;
+            betValueText.text = willAllIn ? "ALL-IN" : rounded.ToString();
+        }
     }
 
     private void CompleteDecision(PlayerDecision decision)

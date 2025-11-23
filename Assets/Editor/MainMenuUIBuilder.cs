@@ -22,7 +22,7 @@ public class MainMenuUIBuilder : EditorWindow
         }
 
         GUILayout.Space(10);
-        EditorGUILayout.HelpBox("Команда пересоздаёт Canvas и полностью настраивает рабочее меню: \n- кнопки 'Присоединиться', 'Создать стол', 'Назад'\n- панель создания стола с вводом блайнда и выбором мест\n- компонент MenuPlayLauncher с привязанными ссылками.", MessageType.Info);
+        EditorGUILayout.HelpBox("Команда пересоздаёт Canvas и полностью настраивает рабочее меню: \n- кнопки 'Присоединиться', 'Создать стол', 'Настройки', 'Таблица лидеров', 'Правила', 'Назад'\n- панель создания стола с вводом блайнда и выбором мест\n- компонент MenuPlayLauncher с привязанными ссылками.", MessageType.Info);
     }
 
     private static void CreateMainMenuUI()
@@ -54,7 +54,8 @@ public class MainMenuUIBuilder : EditorWindow
         RectTransform primaryRect = primaryPanel.GetComponent<RectTransform>();
         primaryRect.anchorMin = new Vector2(0.5f, 0.5f);
         primaryRect.anchorMax = new Vector2(0.5f, 0.5f);
-        primaryRect.sizeDelta = new Vector2(380, 300);
+        // Текущие настройки из сцены: sizeDelta (380, 0) - высота определяется ContentSizeFitter
+        primaryRect.sizeDelta = new Vector2(380, 0);
         primaryRect.anchoredPosition = Vector2.zero;
 
         VerticalLayoutGroup primaryLayout = primaryPanel.AddComponent<VerticalLayoutGroup>();
@@ -67,6 +68,8 @@ public class MainMenuUIBuilder : EditorWindow
         Button joinButton = CreateButton("JoinDefaultButton", primaryPanel.transform, "присоединиться к столу");
         Button openCreateButton = CreateButton("OpenCreatePanelButton", primaryPanel.transform, "создать стол");
         Button settingsButton = CreateButton("SettingsButton", primaryPanel.transform, "настройки");
+        Button leaderboardButton = CreateButton("LeaderboardButton", primaryPanel.transform, "таблица лидеров");
+        Button rulesButton = CreateButton("RulesButton", primaryPanel.transform, "правила");
         Button backButton = CreateButton("BackButton", primaryPanel.transform, "назад");
 
         // Панель создания стола
@@ -78,7 +81,8 @@ public class MainMenuUIBuilder : EditorWindow
         RectTransform createRect = createPanel.GetComponent<RectTransform>();
         createRect.anchorMin = new Vector2(0.5f, 0.5f);
         createRect.anchorMax = new Vector2(0.5f, 0.5f);
-        createRect.sizeDelta = new Vector2(480, 360);
+        // Текущие настройки из сцены: sizeDelta (480, 312), anchoredPosition (0, 0)
+        createRect.sizeDelta = new Vector2(480, 312);
         createRect.anchoredPosition = Vector2.zero;
 
         VerticalLayoutGroup createLayout = createPanel.AddComponent<VerticalLayoutGroup>();
@@ -183,6 +187,8 @@ public class MainMenuUIBuilder : EditorWindow
         controllerSO.FindProperty("friendsListController").objectReferenceValue = friendsController;
         controllerSO.FindProperty("friendRequestsPanel").objectReferenceValue = friendRequestsPanel;
         controllerSO.FindProperty("friendRequestCenter").objectReferenceValue = requestsController;
+        controllerSO.FindProperty("leaderboardButton").objectReferenceValue = leaderboardButton;
+        controllerSO.FindProperty("rulesButton").objectReferenceValue = rulesButton;
         var sectionsProp = controllerSO.FindProperty("mainMenuSections");
         sectionsProp.arraySize = 3;
         sectionsProp.GetArrayElementAtIndex(0).objectReferenceValue = menuBackground;
@@ -213,7 +219,7 @@ public class MainMenuUIBuilder : EditorWindow
 
         SerializedObject locSO = new SerializedObject(localization);
         SerializedProperty entriesProp = locSO.FindProperty("entries");
-        entriesProp.arraySize = 32;
+        entriesProp.arraySize = 34;
         SetLocalizationEntry(entriesProp, 0, "JoinDefaultButton", "присоединиться к столу", "Join table");
         SetLocalizationEntry(entriesProp, 1, "OpenCreatePanelButton", "создать стол", "Create table");
         SetLocalizationEntry(entriesProp, 2, "SettingsButton", "настройки", "Settings");
@@ -246,6 +252,8 @@ public class MainMenuUIBuilder : EditorWindow
         SetLocalizationEntry(entriesProp, 29, "AcceptButton", "принять", "Accept");
         SetLocalizationEntry(entriesProp, 30, "DeclineButton", "отклонить", "Decline");
         SetLocalizationEntry(entriesProp, 31, "CancelButton", "отменить", "Cancel");
+        SetLocalizationEntry(entriesProp, 32, "LeaderboardButton", "таблица лидеров", "Leaderboard");
+        SetLocalizationEntry(entriesProp, 33, "RulesButton", "правила", "Rules");
         locSO.ApplyModifiedProperties();
  
         // Назначаем "назад" на главной панели, чтобы закрывать игру (можно повесить выход в будущее)
@@ -1097,8 +1105,9 @@ private static GameObject CreateUserHeader(Transform parent, out Image avatarIma
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = new Vector2(0f, 0f);
-        rect.sizeDelta = new Vector2(720f, 560f);
+        // Текущие настройки из сцены: anchoredPosition (0, -50), sizeDelta (720, 746.0421)
+        rect.anchoredPosition = new Vector2(0f, -50f);
+        rect.sizeDelta = new Vector2(720f, 746.0421f);
 
         GameObject contentGO = new GameObject("Content");
         Undo.RegisterCreatedObjectUndo(contentGO, "Create Friend Requests Content");
@@ -1282,8 +1291,9 @@ private static GameObject CreateUserHeader(Transform parent, out Image avatarIma
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = new Vector2(10f, 33f);
-        rect.sizeDelta = new Vector2(766.627f, 566.452f);
+        // Текущие настройки из сцены: anchoredPosition (10, -70.655396), sizeDelta (766.627, 773.7628)
+        rect.anchoredPosition = new Vector2(10f, -70.655396f);
+        rect.sizeDelta = new Vector2(766.627f, 773.7628f);
 
         GameObject contentGO = new GameObject("Content");
         Undo.RegisterCreatedObjectUndo(contentGO, "Create Settings Content");

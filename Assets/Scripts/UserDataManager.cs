@@ -279,10 +279,26 @@ public static class UserDataManager
             
             if (File.Exists(profilePath))
             {
-                string backupFileName = $"{username}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
-                string backupPath = Path.Combine(BackupPath, backupFileName);
+                string baseFileName = $"{username}_{DateTime.Now:yyyyMMdd_HHmmss}";
+                string backupPath = Path.Combine(BackupPath, $"{baseFileName}.json");
+                
+                // Если файл уже существует, добавляем счетчик
+                int counter = 1;
+                while (File.Exists(backupPath))
+                {
+                    backupPath = Path.Combine(BackupPath, $"{baseFileName}_{counter:D3}.json");
+                    counter++;
+                    
+                    // Защита от бесконечного цикла
+                    if (counter > 999)
+                    {
+                        Debug.LogWarning($"Too many backup attempts for {username}, skipping backup creation");
+                        return;
+                    }
+                }
                 
                 File.Copy(profilePath, backupPath);
+                Debug.Log($"Backup created: {Path.GetFileName(backupPath)}");
                 
                 // Удаляем старые резервные копии (старше 30 дней)
                 CleanOldBackups(username);
@@ -392,6 +408,74 @@ public static class UserDataManager
         }
     }
     
+    /// <summary>
+    /// Удаляет всех пользователей кроме указанных
+    /// </summary>
+    public static int DeleteAllUsersExcept(List<string> usernamesToKeep)
+    {
+        int deletedCount = 0;
+        try
+        {
+            if (!Directory.Exists(ProfilesPath))
+            {
+                Debug.LogWarning("ProfilesPath does not exist. No users to delete.");
+                return 0;
+            }
+
+            string[] files = Directory.GetFiles(ProfilesPath, "*.json");
+            HashSet<string> keepSet = new HashSet<string>(usernamesToKeep, StringComparer.OrdinalIgnoreCase);
+
+            foreach (string file in files)
+            {
+                try
+                {
+                    string fileName = Path.GetFileNameWithoutExtension(file);
+                    
+                    // Проверяем, нужно ли сохранить этого пользователя
+                    bool shouldKeep = false;
+                    foreach (string keepUsername in keepSet)
+                    {
+                        string sanitizedKeep = SanitizeFileName(keepUsername);
+                        if (string.Equals(fileName, sanitizedKeep, StringComparison.OrdinalIgnoreCase))
+                        {
+                            shouldKeep = true;
+                            break;
+                        }
+                    }
+
+                    if (!shouldKeep)
+                    {
+                        // Удаляем файл профиля
+                        File.Delete(file);
+                        deletedCount++;
+
+                        // Удаляем папку с файлами пользователя (аватары и т.д.)
+                        string userFilesPath = Path.Combine(ProfilesPath, $"{fileName}_Files");
+                        if (Directory.Exists(userFilesPath))
+                        {
+                            Directory.Delete(userFilesPath, true);
+                        }
+
+                        Debug.Log($"Deleted profile: {fileName}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Failed to delete profile from {file}: {ex.Message}");
+                }
+            }
+
+            Debug.Log($"Deleted {deletedCount} user profiles. Kept {keepSet.Count} users: {string.Join(", ", usernamesToKeep)}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Failed to delete users: {e.Message}");
+            OnDataError?.Invoke($"Ошибка удаления пользователей: {e.Message}");
+        }
+
+        return deletedCount;
+    }
+
     /// <summary>
     /// Получает размер данных в байтах
     /// </summary>

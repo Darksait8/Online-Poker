@@ -174,4 +174,37 @@ public class ConnectionManager : MonoBehaviour
         UpdateClientSettings();
         Debug.Log($"🔧 Настройки обновлены: {serverHostInput?.text}:{serverPortInput?.text}");
     }
+    
+    /// <summary>
+    /// Устанавливает IP-адрес сервера программно
+    /// </summary>
+    public void SetServerAddress(string host, int port = 8888)
+    {
+        if (serverHostInput != null)
+            serverHostInput.text = host;
+            
+        if (serverPortInput != null)
+            serverPortInput.text = port.ToString();
+        
+        SaveSettings();
+        UpdateClientSettings();
+    }
+    
+    /// <summary>
+    /// Получает текущий IP-адрес сервера
+    /// </summary>
+    public string GetServerHost()
+    {
+        return serverHostInput != null ? serverHostInput.text : "localhost";
+    }
+    
+    /// <summary>
+    /// Получает текущий порт сервера
+    /// </summary>
+    public int GetServerPort()
+    {
+        if (serverPortInput != null && int.TryParse(serverPortInput.text, out int port))
+            return port;
+        return 8888;
+    }
 }

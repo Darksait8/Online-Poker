@@ -18,6 +18,7 @@ public class NewBehaviourScript : MonoBehaviour
     [SerializeField] private GameObject betBubble;
     [SerializeField] private Text betText;
     [SerializeField] private TMP_Text betTextTMP;
+    [SerializeField] private float betBubbleOutwardOffset = 40f;
 
     [Header("Карманные карты (опционально)")]
     [SerializeField] private Image hole1Image;
@@ -25,16 +26,48 @@ public class NewBehaviourScript : MonoBehaviour
     [SerializeField] private Sprite holeCardBack;
     [SerializeField] private GameObject dealerButton;
 
+    [Header("Размеры карт")]
+    [SerializeField] private Vector2 holeCardSize = new Vector2(65f, 95f); // Размер hole карт
+
     [Header("Фишки ставки")]
     [SerializeField] private BetChipDisplay chipDisplay;
+    [Header("Расстояния до центра")]
+    [SerializeField, Tooltip("Положительное значение отодвигает карманные карты от центра (в пикселях)")]
+    private float holeDistanceOffset = 40f;
+    [SerializeField, Tooltip("Отрицательное значение тянет фишки ближе к игроку, положительное — к центру")]
+    private float chipDistanceOffset = -70f;
+    [SerializeField, Tooltip("Дополнительный поворот карманных карт в градусах")]
+    private float holeRotationOffset;
     private Vector2 cachedInwardDirection = Vector2.down;
-    private float cachedHoleDistance = 28f;
+    private float cachedHoleDistance = 55f; // Увеличено для размещения карт ближе к центру стола
 
     private void Awake()
     {
         EnsureHoleCardBack();
         EnsureChipDisplay();
+        SetHoleCardSizes();
         ShowChips(false);
+    }
+
+    private void SetHoleCardSizes()
+    {
+        SetImageSize(hole1Image);
+        SetImageSize(hole2Image);
+    }
+
+    private void SetImageSize(Image img)
+    {
+        if (img == null) return;
+        
+        // Настраиваем Image для правильного отображения карт
+        img.type = Image.Type.Simple;
+        img.preserveAspect = true; // Сохраняем пропорции карт
+        
+        RectTransform rt = img.rectTransform;
+        if (rt != null)
+        {
+            rt.sizeDelta = holeCardSize;
+        }
     }
 
     private void EnsureHoleCardBack()
@@ -82,8 +115,14 @@ public class NewBehaviourScript : MonoBehaviour
             chipDisplay.InitializeRuntime();
             var seatRect = transform as RectTransform;
             if (seatRect != null)
-                chipDisplay.ConfigureSeatAnchor(seatRect, cachedInwardDirection, cachedHoleDistance);
+            {
+                float chipDistance = Mathf.Max(0f, cachedHoleDistance + chipDistanceOffset);
+                chipDisplay.ConfigureSeatAnchor(seatRect, cachedInwardDirection, chipDistance);
+            }
         }
+
+        if (BetBubbleRect != null)
+            UpdateBetBubblePosition();
     }
 
     public void SetPlayer(string playerName, int stack, Sprite avatar = null)
@@ -131,6 +170,8 @@ public class NewBehaviourScript : MonoBehaviour
             betText.text = valueText;
 
         chipDisplay?.SetAmount(chips);
+        if (BetBubbleRect != null)
+            UpdateBetBubblePosition();
     }
 
     public void ShowChips(bool show)
@@ -172,12 +213,16 @@ public class NewBehaviourScript : MonoBehaviour
         if (hole1Image != null)
         {
             hole1Image.sprite = holeCardBack;
+            hole1Image.type = Image.Type.Simple;
+            hole1Image.preserveAspect = true; // Сохраняем пропорции спрайта
             hole1Image.enabled = true;
         }
 
         if (hole2Image != null)
         {
             hole2Image.sprite = holeCardBack;
+            hole2Image.type = Image.Type.Simple;
+            hole2Image.preserveAspect = true; // Сохраняем пропорции спрайта
             hole2Image.enabled = true;
         }
     }
@@ -189,12 +234,16 @@ public class NewBehaviourScript : MonoBehaviour
         {
             var s = CardSpriteProvider.GetSprite(a);
             hole1Image.sprite = s != null ? s : holeCardBack;
+            hole1Image.type = Image.Type.Simple;
+            hole1Image.preserveAspect = true; // Сохраняем пропорции спрайта
             hole1Image.enabled = true;
         }
         if (hole2Image != null)
         {
             var s = CardSpriteProvider.GetSprite(b);
             hole2Image.sprite = s != null ? s : holeCardBack;
+            hole2Image.type = Image.Type.Simple;
+            hole2Image.preserveAspect = true; // Сохраняем пропорции спрайта
             hole2Image.enabled = true;
         }
     }
@@ -214,25 +263,26 @@ public class NewBehaviourScript : MonoBehaviour
         }
     }
 
-    public void ConfigureHoleLayout(Vector2 inwardDirection, float rotationDeg, float distance = 28f, float spacing = 20f)
+    public void ConfigureHoleLayout(Vector2 inwardDirection, float rotationDeg, float distance = 55f, float spacing = 22f)
     {
         // inwardDirection должен быть нормализован и указывать К ЦЕНТРУ стола
         if (inwardDirection.sqrMagnitude < 0.0001f) inwardDirection = new Vector2(0f, -1f);
         inwardDirection.Normalize();
         cachedInwardDirection = inwardDirection;
-        cachedHoleDistance = distance;
+        float adjustedDistance = Mathf.Max(0f, distance + holeDistanceOffset);
+        cachedHoleDistance = adjustedDistance;
         if (chipDisplay != null)
         {
             var seatRect = transform as RectTransform;
-            chipDisplay.ConfigureSeatAnchor(seatRect, cachedInwardDirection, cachedHoleDistance + spacing);
+            float chipDistance = Mathf.Max(0f, cachedHoleDistance + spacing + chipDistanceOffset);
+            chipDisplay.ConfigureSeatAnchor(seatRect, cachedInwardDirection, chipDistance);
         }
         Vector2 tangent = new Vector2(-inwardDirection.y, inwardDirection.x); // перпендикуляр
-
-        Vector2 pos1 = inwardDirection * distance - tangent * (spacing * 0.5f);
-        Vector2 pos2 = inwardDirection * distance + tangent * (spacing * 0.5f);
+        Vector2 pos1 = inwardDirection * adjustedDistance - tangent * (spacing * 0.5f);
+        Vector2 pos2 = inwardDirection * adjustedDistance + tangent * (spacing * 0.5f);
 
         // Используем переданный поворот вместо вычисления собственного
-        float correctRotation = rotationDeg;
+        float correctRotation = rotationDeg + holeRotationOffset;
         
         Debug.Log($"[{name}] ConfigureHoleLayout: используем переданный поворот={correctRotation}°");
 
@@ -260,5 +310,27 @@ public class NewBehaviourScript : MonoBehaviour
             // Проверим поворот через кадр
             StartCoroutine(CheckRotationLater(rt, "Hole2", correctRotation));
         }
+
+        UpdateBetBubblePosition();
+    }
+
+    public void SetHoleRotationOffset(float offset)
+    {
+        holeRotationOffset = offset;
+    }
+
+    private void UpdateBetBubblePosition()
+    {
+        var bubble = BetBubbleRect;
+        if (bubble == null)
+            return;
+
+        bubble.anchorMin = bubble.anchorMax = new Vector2(0.5f, 0.5f);
+        bubble.pivot = new Vector2(0.5f, 0.5f);
+        bubble.SetAsLastSibling();
+
+        Vector2 outward = -cachedInwardDirection;
+        Vector2 offset = outward * Mathf.Max(0f, cachedHoleDistance + betBubbleOutwardOffset);
+        bubble.anchoredPosition = offset;
     }
 }

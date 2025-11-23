@@ -18,7 +18,7 @@ public class SeatsLayoutRadial : MonoBehaviour
 
     [Header("Карманные карты — раскладка")]
     [SerializeField] private bool applyHoleLayout = true;
-    [SerializeField] private float holeDistance = 28f;     // расстояние от центра стула к центру пары карт
+    [SerializeField] private float holeDistance = 55f;     // расстояние от центра стула к центру пары карт (увеличено для размещения ближе к центру стола)
     [SerializeField] private float holeSpacing = 22f;      // расстояние между картами
 
 
@@ -122,7 +122,9 @@ public class SeatsLayoutRadial : MonoBehaviour
                     // Нормализуем угол поворота
                     rot = Mathf.Repeat(rot, 360f);
                     
-                    Debug.Log($"Seat_{i + 1}: angleDeg = {angleDeg:F1}°, rot = {rot:F1}°");
+                    bool invertForTop = angleDeg > 45f && angleDeg < 135f;
+                    ui.SetHoleRotationOffset(invertForTop ? 180f : 0f);
+                    Debug.Log($"Seat_{i + 1}: angleDeg = {angleDeg:F1}°, rot = {rot:F1}°, extra={(invertForTop ? 180f : 0f)}");
                     ui.ConfigureHoleLayout(inward, rot, holeDistance, holeSpacing);
                 }
             }

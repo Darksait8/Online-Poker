@@ -195,6 +195,21 @@ public class GameManager : MonoBehaviour
             humanAvatar = AvatarLibrary.GetAvatarSprite("default");
         Sprite botAvatar = AvatarLibrary.GetAvatarSprite("bot") ?? AvatarLibrary.GetAvatarSprite("default");
 
+        // Загружаем баланс из профиля для реального игрока
+        int humanStartingChips = defaultStack;
+        int humanStartingXp = 0;
+        if (currentUser != null && !enableBots)
+        {
+            humanStartingChips = currentUser.chips; // Используем точный баланс из профиля
+            humanStartingXp = currentUser.XP;
+        }
+        else if (currentUser != null && enableBots)
+        {
+            // Если включены боты, используем баланс из профиля
+            humanStartingChips = currentUser.chips; // Используем точный баланс из профиля
+            humanStartingXp = currentUser.XP;
+        }
+
         for (int i = 0; i < occupiedSeats.Count; i++)
         {
             var seatUI = occupiedSeats[i];
@@ -203,12 +218,15 @@ public class GameManager : MonoBehaviour
             bool isHuman = !enableBots || i == humanSeatIndex;
             string playerName = isHuman ? humanNickname : $"Бот {i + 1}";
             Sprite seatAvatar = isHuman ? humanAvatar : botAvatar;
+            int startingChips = isHuman ? humanStartingChips : defaultStack;
+            int startingXp = isHuman ? humanStartingXp : 0;
+            
             var existingIndicator = seatUI.transform.Find("TurnIndicator");
             if (existingIndicator != null)
             {
                 Destroy(existingIndicator.gameObject);
             }
-            seatUI.SetPlayer(playerName, defaultStack, seatAvatar);
+            seatUI.SetPlayer(playerName, startingChips, seatAvatar);
             seatUI.ShowBet(0);
             seatUI.HideHoles();
             seatUI.SetDealer(false);
@@ -218,22 +236,22 @@ public class GameManager : MonoBehaviour
             {
                 corePlayer = new HumanPlayer(playerName, PlayerType.Human)
                 {
-                    TokensCount = defaultStack,
+                    TokensCount = startingChips,
                     SeatNr = i,
-                    XP = 0
+                    XP = startingXp
                 };
             }
             else
             {
                 corePlayer = new WonderPokerCore.Player(playerName, PlayerType.Bot)
                 {
-                    TokensCount = defaultStack,
+                    TokensCount = startingChips,
                     SeatNr = i,
-                    XP = 0
+                    XP = 0 // Боты не получают XP
                 };
             }
 
-            var legacyPlayer = new Player(i, playerName, defaultStack, i)
+            var legacyPlayer = new Player(i, playerName, startingChips, i)
             {
                 Status = PlayerStatus.Active
             };
@@ -272,15 +290,33 @@ public class GameManager : MonoBehaviour
 
         gameTable = new GameTable("Main Table", owner);
         gameTable.Settings.ChangeBigBlind(bigBlind);
-        gameTable.Settings.ChangeMinTokens(owner.TokensCount);
+        gameTable.Settings.ChangeMinTokens(0); // Разрешаем игрокам с любым количеством фишек
+        gameTable.Settings.ChangeMinExperience(0); // Разрешаем игрокам с любым XP
         gameTable.Settings.ChangeMaxPlayers(runtimePlayers.Count);
+        
         coreToView[owner] = runtimePlayers[0];
 
         for (int i = 1; i < runtimePlayers.Count; i++)
         {
             var view = runtimePlayers[i];
-            gameTable.AddPlayer(view.core);
-            coreToView[view.core] = view;
+            bool added = gameTable.AddPlayer(view.core);
+            if (!added)
+            {
+                Debug.LogError($"GameManager: Failed to add player {view.core.Nick} (seat {i}) to gameTable. XP: {view.core.XP}, Chips: {view.core.TokensCount}");
+            }
+            else
+            {
+                coreToView[view.core] = view;
+            }
+        }
+
+        // Проверяем, что все игроки добавлены в gameTable
+        if (gameTable.Players.Count != runtimePlayers.Count)
+        {
+            Debug.LogError($"GameManager: Mismatch between gameTable.Players.Count ({gameTable.Players.Count}) and runtimePlayers.Count ({runtimePlayers.Count}). Cannot start game.");
+            Debug.LogError($"GameManager: gameTable.Players: {string.Join(", ", gameTable.Players.Select(p => $"{p.Nick} (XP: {p.XP}, Chips: {p.TokensCount})"))}");
+            Debug.LogError($"GameManager: runtimePlayers: {string.Join(", ", runtimePlayers.Select(v => $"{v.core.Nick} (XP: {v.core.XP}, Chips: {v.core.TokensCount})"))}");
+            return;
         }
 
         SetupDecisionRouter();
@@ -350,6 +386,19 @@ public class GameManager : MonoBehaviour
     {
         if (matchFinished)
             return;
+
+        if (gameTable == null || gameTable.Players == null)
+        {
+            Debug.LogError("GameManager: gameTable or Players is null");
+            return;
+        }
+
+        int playersCount = gameTable.Players.Count;
+        if (playersCount < 2)
+        {
+            Debug.LogError($"GameManager: not enough players in gameTable to start hand. Players count: {playersCount}, runtimePlayers: {runtimePlayers.Count}");
+            return;
+        }
 
         try
         {
@@ -539,6 +588,10 @@ public class GameManager : MonoBehaviour
         else if (decision.Type == PlayerDecisionType.AllIn && delta > 0)
             lastFullRaiseAmount = Math.Max(lastFullRaiseAmount, delta);
 
+        bool playerAllIn = decision.Type == PlayerDecisionType.AllIn || view.core.TokensCount <= 0 || view.legacy.Stack <= 0;
+        if (playerAllIn)
+            HandlePlayerAllIn(view);
+
         NotifyBotAction(player,
                         ToStage(currentPhase),
                         ConvertDecisionToAction(decision, callAmountBefore),
@@ -553,6 +606,39 @@ public class GameManager : MonoBehaviour
         view.legacy.Status = PlayerStatus.Folded;
         view.ui.HideHoles();
         view.ui.ShowChips(false);
+    }
+
+    private void HandlePlayerAllIn(PlayerSeatView view)
+    {
+        if (view == null)
+            return;
+
+        view.legacy.Status = PlayerStatus.AllIn;
+        RevealPlayerCards(view);
+    }
+
+    private void RevealPlayerCards(PlayerSeatView view)
+    {
+        if (view == null || view.ui == null)
+            return;
+
+        var cards = view.legacy.HoleCards;
+        if (cards == null || cards.Length < 2)
+        {
+            var coreCards = view.core?.PlayerHand?.Cards;
+            if (coreCards != null && coreCards.Count >= 2)
+            {
+                cards = new[]
+                {
+                    WonderCardConverter.ToClientCard(coreCards[0]),
+                    WonderCardConverter.ToClientCard(coreCards[1])
+                };
+                view.legacy.HoleCards = cards;
+            }
+        }
+
+        if (cards != null && cards.Length >= 2)
+            view.ui.ShowHole(cards[0], cards[1]);
     }
 
     private void HandleBlindPaid(WonderPokerCore.Player player, int amount)
@@ -683,14 +769,38 @@ public class GameManager : MonoBehaviour
         var messageBuilder = new System.Text.StringBuilder();
         messageBuilder.AppendLine("Раздача завершена!");
 
+        UserProfile currentUser = AuthManager.CurrentUser;
+        
         foreach (var view in winnerViews)
         {
             int previousStack = view.legacy.Stack;
             int chipsGain = view.core.TokensCount - previousStack;
-            int xpGain = 100; // соответствует начислению в GameplayController
+            int xpGain = 0;
+            
+            // Начисляем XP и обновляем баланс только реальному игроку (не ботам)
+            bool isHuman = view.core is HumanPlayer || (!enableBots || (seatIndexByPlayer.TryGetValue(view.core, out int seatIdx) && seatIdx == humanSeatIndex));
+            if (isHuman && currentUser != null)
+            {
+                xpGain = 100; // Начисляем XP только реальному игроку
+                int newBalance = view.core.TokensCount;
+                int newXp = view.core.XP + xpGain;
+                
+                // Обновляем баланс и XP в профиле
+                AuthManager.UpdatePlayerBalance(newBalance);
+                AuthManager.AddPlayerXp(xpGain);
+                
+                // Обновляем XP в core объекте для отображения
+                view.core.XP = newXp;
+                
+                messageBuilder.AppendLine($"{view.legacy.Name}: +{chipsGain} фишек (+{xpGain} XP)");
+            }
+            else
+            {
+                // Для ботов просто показываем выигрыш фишек, без XP
+                messageBuilder.AppendLine($"{view.legacy.Name}: +{chipsGain} фишек");
+            }
+            
             legacyWinners.Add(view.legacy);
-
-            messageBuilder.AppendLine($"{view.legacy.Name}: +{chipsGain} фишек (+{xpGain} XP)");
         }
 
         OnShowdown?.Invoke(legacyWinners);
@@ -1168,6 +1278,21 @@ public class GameManager : MonoBehaviour
 
         matchFinished = true;
         Time.timeScale = 0f;
+
+        // Сохраняем финальный баланс для реального игрока
+        UserProfile currentUser = AuthManager.CurrentUser;
+        if (currentUser != null && winner != null)
+        {
+            bool isHuman = winner.core is HumanPlayer || 
+                          (!enableBots || (seatIndexByPlayer.TryGetValue(winner.core, out int seatIdx) && seatIdx == humanSeatIndex));
+            
+            if (isHuman)
+            {
+                int finalBalance = winner.core.TokensCount;
+                AuthManager.UpdatePlayerBalance(finalBalance);
+                Debug.Log($"GameManager: Сохранен финальный баланс {finalBalance} фишек для игрока {currentUser.username}");
+            }
+        }
 
         string winnerName = winner?.legacy?.Name ?? "Игрок";
         int winnerStack = winner?.legacy?.Stack ?? 0;

@@ -14,6 +14,16 @@ public class BetChipDisplay : MonoBehaviour
     [SerializeField] private Vector2 offset = new Vector2(0f, -60f);
     [SerializeField] private int chipsPerColumn = 5;
 
+    [Header("Stack layout")]
+    [SerializeField] private bool useStackLayout = true;
+    [SerializeField] private Vector2 stackStep = new Vector2(2f, 10f);
+    [SerializeField] private float stackBaseSpacing = 32f;
+    [SerializeField] private float stackTiltPerChip = -1.5f;
+    [SerializeField] private float stackFanAngle = 10f;
+    [SerializeField] private int maxVisualChips = 28;
+    [SerializeField] private bool autoUpgradeDenomination = true;
+    [SerializeField] private bool autoAssignChipValues = true;
+
     [Header("Набор фишек")]
     [SerializeField] private ChipVisual[] chipSet;
     [Header("Привязка к месту игрока")]
@@ -37,18 +47,34 @@ public class BetChipDisplay : MonoBehaviour
     private Vector2 seatInwardDirection = Vector2.down;
     private float seatPreferredDistance;
     private bool seatConfigAssigned;
+    private readonly Dictionary<int, ChipVisual> chipLookup = new();
+    private int[] chipValuesAsc = Array.Empty<int>();
+    private static readonly HashSet<string> WarnedSpriteNames = new();
 
     private static readonly Dictionary<string, int> DefaultChipValues = new()
     {
-        {"white", 100},
-        {"blue", 200},
-        {"green", 200},
-        {"red", 500},
-        {"purple", 500},
-        {"black", 1000},
-        {"orange", 1000},
-        {"yellow", 1000},
-        {"pink", 200}
+        {"white", 1000},
+        {"pink", 2500},
+        {"blue", 5000},
+        {"green", 10000},
+        {"red", 25000},
+        {"purple", 50000},
+        {"black", 100000},
+        {"orange", 250000},
+        {"yellow", 500000}
+    };
+
+    private static readonly Dictionary<int, int> DefaultChipIndexValues = new()
+    {
+        {0, 1000},
+        {1, 2500},
+        {2, 5000},
+        {3, 10000},
+        {4, 25000},
+        {5, 50000},
+        {6, 100000},
+        {7, 250000},
+        {8, 500000}
     };
 
     public bool HasActiveAmount => currentAmount > 0;
@@ -59,6 +85,8 @@ public class BetChipDisplay : MonoBehaviour
             offset = Vector2.zero;
         EnsureContainer();
         EnsureChipSet();
+        if (autoAssignChipValues)
+            RefreshChipValuesFromSprites();
         SortChipDefinitions();
         Show(false);
         PositionContainer();
@@ -86,55 +114,7 @@ public class BetChipDisplay : MonoBehaviour
 
         Show(true);
 
-        int remaining = amount;
-        int columnIndex = 0;
-        int stackIndex = 0;
-        var layout = new List<ChipLayoutEntry>();
-
-        foreach (var chip in chipSet)
-        {
-            if (chip.value <= 0 || chip.sprite == null)
-                continue;
-
-            while (remaining >= chip.value)
-            {
-                var image = GetImage();
-                image.sprite = chip.sprite;
-                image.rectTransform.sizeDelta = chipSize;
-                layout.Add(new ChipLayoutEntry(
-                    image,
-                    new Vector2(
-                        columnIndex * (chipSize.x + spacing.x),
-                        stackIndex * (chipSize.y + spacing.y)),
-                    chip.value));
-
-                remaining -= chip.value;
-                stackIndex++;
-                if (stackIndex >= Mathf.Max(1, chipsPerColumn))
-                {
-                    stackIndex = 0;
-                    columnIndex++;
-                }
-            }
-        }
-
-        if (remaining > 0 && layout.Count > 0)
-        {
-            var fallbackChip = chipSet.LastOrDefault(c => c.sprite != null);
-            if (fallbackChip.sprite != null)
-            {
-                var image = GetImage();
-                image.sprite = fallbackChip.sprite;
-                image.rectTransform.sizeDelta = chipSize;
-                layout.Add(new ChipLayoutEntry(
-                    image,
-                    new Vector2(
-                        columnIndex * (chipSize.x + spacing.x),
-                        stackIndex * (chipSize.y + spacing.y)),
-                    fallbackChip.value > 0 ? fallbackChip.value : remaining));
-                remaining = 0;
-            }
-        }
+        var layout = BuildChipLayout(amount);
 
         if (layout.Count == 0)
         {
@@ -143,25 +123,8 @@ public class BetChipDisplay : MonoBehaviour
             return;
         }
 
-        layout = CompressLayout(layout);
-
-        float totalWidth = 0f;
-        foreach (var entry in layout)
-            totalWidth = Mathf.Max(totalWidth, entry.position.x);
-        float offsetX = totalWidth * 0.5f;
-
-        foreach (var entry in layout)
-        {
-            var image = entry.image;
-            var rt = image.rectTransform;
-            rt.SetParent(chipContainer, false);
-            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
-            rt.pivot = new Vector2(0.5f, 0.5f);
-            rt.anchoredPosition = new Vector2(entry.position.x - offsetX, entry.position.y);
-            rt.localRotation = Quaternion.identity;
-            rt.localScale = Vector3.one;
-            rt.SetAsLastSibling();
-        }
+        ApplyLayout(layout);
+        RenderLayout(layout);
 
         chipContainer.SetAsLastSibling();
         PositionContainer();
@@ -236,6 +199,48 @@ public class BetChipDisplay : MonoBehaviour
         if (chipSet == null || chipSet.Length == 0)
             return;
         Array.Sort(chipSet, (a, b) => b.value.CompareTo(a.value));
+
+        chipLookup.Clear();
+        var values = new List<int>();
+        foreach (var chip in chipSet)
+        {
+            if (chip.value <= 0 || chip.sprite == null)
+                continue;
+            if (chipLookup.ContainsKey(chip.value))
+                continue;
+
+            chipLookup[chip.value] = chip;
+            values.Add(chip.value);
+        }
+
+        chipValuesAsc = values.OrderBy(v => v).ToArray();
+    }
+
+    private void RefreshChipValuesFromSprites()
+    {
+        if (chipSet == null || chipSet.Length == 0)
+            return;
+
+        bool changed = false;
+        for (int i = 0; i < chipSet.Length; i++)
+        {
+            var sprite = chipSet[i].sprite;
+            if (sprite == null)
+                continue;
+
+            int resolved = ResolveDefaultValue(sprite.name);
+            if (resolved <= 0)
+                continue;
+
+            if (chipSet[i].value != resolved)
+            {
+                chipSet[i].value = resolved;
+                changed = true;
+            }
+        }
+
+        if (changed)
+            SortChipDefinitions();
     }
 
     private Image GetImage()
@@ -268,27 +273,285 @@ public class BetChipDisplay : MonoBehaviour
         activeImages.Clear();
     }
 
-    private List<ChipLayoutEntry> CompressLayout(List<ChipLayoutEntry> layout)
+    private List<ChipLayoutEntry> BuildChipLayout(int amount)
     {
-        const int maxVisualChips = 16;
-        if (layout.Count <= maxVisualChips)
-            return layout;
+        var distribution = BuildChipDistribution(amount);
+        if (distribution.Count == 0)
+            return new List<ChipLayoutEntry>();
 
-        // Collapse to grid without visual overlap by increasing spacing and stacking
-        float colWidth = chipSize.x + spacing.x;
-        float rowHeight = chipSize.y + spacing.y;
+        if (autoUpgradeDenomination)
+            OptimizeDistribution(distribution);
+
+        var entries = BuildEntriesFromDistribution(distribution);
+        if (entries.Count > maxVisualChips)
+            return BuildAggregateLayout(amount);
+
+        return entries;
+    }
+
+    private Dictionary<int, int> BuildChipDistribution(int amount)
+    {
+        var distribution = new Dictionary<int, int>();
+        if (chipSet == null || chipSet.Length == 0)
+            return distribution;
+
+        int remaining = amount;
+
+        foreach (var chip in chipSet)
+        {
+            if (chip.value <= 0 || chip.sprite == null)
+                continue;
+
+            int count = remaining / chip.value;
+            if (count <= 0)
+                continue;
+
+            if (!distribution.ContainsKey(chip.value))
+                distribution[chip.value] = 0;
+            distribution[chip.value] += count;
+            remaining -= count * chip.value;
+        }
+
+        if (remaining > 0)
+        {
+            var smallest = GetSmallestChip();
+            if (smallest.sprite != null && smallest.value > 0)
+            {
+                if (!distribution.ContainsKey(smallest.value))
+                    distribution[smallest.value] = 0;
+                distribution[smallest.value] += 1;
+            }
+        }
+
+        return distribution;
+    }
+
+    private void OptimizeDistribution(Dictionary<int, int> distribution)
+    {
+        if (distribution == null || distribution.Count == 0)
+            return;
+
+        int limit = Mathf.Max(1, maxVisualChips);
+        int total = distribution.Values.Sum();
+        if (total <= limit)
+            return;
+
+        bool modified;
+        int safety = 256;
+        do
+        {
+            modified = TryPromoteOnce(distribution);
+            total = distribution.Values.Sum();
+            safety--;
+        } while (modified && total > limit && safety > 0);
+    }
+
+    private bool TryPromoteOnce(Dictionary<int, int> distribution)
+    {
+        if (chipValuesAsc == null || chipValuesAsc.Length < 2)
+            return false;
+
+        for (int i = 0; i < chipValuesAsc.Length - 1; i++)
+        {
+            int fromValue = chipValuesAsc[i];
+            int toValue = chipValuesAsc[i + 1];
+
+            if (!distribution.TryGetValue(fromValue, out var count) || count <= 0)
+                continue;
+            if (!chipLookup.ContainsKey(toValue))
+                continue;
+            if (toValue % fromValue != 0)
+                continue;
+
+            int needed = toValue / fromValue;
+            if (needed <= 1 || count < needed)
+                continue;
+
+            distribution[fromValue] = count - needed;
+            if (distribution[fromValue] <= 0)
+                distribution.Remove(fromValue);
+
+            if (!distribution.ContainsKey(toValue))
+                distribution[toValue] = 0;
+            distribution[toValue] += 1;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ApplyLayout(List<ChipLayoutEntry> layout)
+    {
+        if (layout == null || layout.Count == 0)
+            return;
+
+        if (useStackLayout)
+            ApplyStackLayout(layout);
+        else
+            ApplyGridLayout(layout);
+    }
+
+    private List<ChipLayoutEntry> BuildEntriesFromDistribution(Dictionary<int, int> distribution)
+    {
+        var orderedValues = distribution.Keys.OrderByDescending(v => v).ToArray();
+        var entries = new List<ChipLayoutEntry>(distribution.Values.Sum());
+
+        foreach (var value in orderedValues)
+        {
+            if (!distribution.TryGetValue(value, out var count) || count <= 0)
+                continue;
+
+            var visual = ResolveChipVisual(value);
+            if (visual.sprite == null)
+                continue;
+
+            for (int i = 0; i < count; i++)
+            {
+                var image = GetImage();
+                image.sprite = visual.sprite;
+                image.rectTransform.sizeDelta = chipSize;
+                entries.Add(new ChipLayoutEntry(image, Vector2.zero, value, 0f));
+            }
+        }
+
+        return entries;
+    }
+
+    private List<ChipLayoutEntry> BuildAggregateLayout(int amount)
+    {
+        var entries = new List<ChipLayoutEntry>();
+        if (chipSet == null || chipSet.Length == 0)
+            return entries;
+
+        int safeLimit = Mathf.Max(1, maxVisualChips);
+        int desiredValue = Mathf.Max(1, Mathf.CeilToInt(amount / (float)safeLimit));
+        int chipValue = ResolveNearestChipValue(desiredValue);
+        var visual = ResolveChipVisual(chipValue);
+        if (visual.sprite == null)
+            visual = chipSet.FirstOrDefault(c => c.sprite != null);
+        if (visual.sprite == null)
+            return entries;
+
+        chipValue = Mathf.Max(1, visual.value > 0 ? visual.value : chipValue);
+        int chipCount = Mathf.Max(1, Mathf.CeilToInt(amount / (float)chipValue));
+        int remaining = amount;
+
+        for (int i = 0; i < chipCount; i++)
+        {
+            int chipsLeft = chipCount - i - 1;
+            int minReserved = chipsLeft * chipValue;
+            int valueForChip = Mathf.Max(1, remaining - minReserved);
+            remaining -= valueForChip;
+
+            var image = GetImage();
+            image.sprite = visual.sprite;
+            image.rectTransform.sizeDelta = chipSize;
+            entries.Add(new ChipLayoutEntry(image, Vector2.zero, valueForChip, 0f));
+        }
+
+        return entries;
+    }
+
+    private void ApplyGridLayout(List<ChipLayoutEntry> layout)
+    {
+        int columnIndex = 0;
+        int rowIndex = 0;
+        int columnLimit = Mathf.Max(1, chipsPerColumn);
 
         for (int i = 0; i < layout.Count; i++)
         {
-            int columnIndex = i / chipsPerColumn;
-            int rowIndex = i % chipsPerColumn;
-            layout[i] = new ChipLayoutEntry(
-                layout[i].image,
-                new Vector2(columnIndex * colWidth, rowIndex * rowHeight),
-                layout[i].value);
+            var entry = layout[i];
+            entry.position = new Vector2(
+                columnIndex * (chipSize.x + spacing.x),
+                rowIndex * (chipSize.y + spacing.y));
+            entry.rotation = 0f;
+            layout[i] = entry;
+
+            rowIndex++;
+            if (rowIndex >= columnLimit)
+            {
+                rowIndex = 0;
+                columnIndex++;
+            }
         }
 
-        return layout;
+        CenterLayout(layout);
+    }
+
+    private void ApplyStackLayout(List<ChipLayoutEntry> layout)
+    {
+        int stackHeight = Mathf.Max(1, chipsPerColumn);
+        int stackCount = Mathf.CeilToInt(layout.Count / (float)stackHeight);
+        float totalWidth = Mathf.Max(0f, (stackCount - 1) * stackBaseSpacing);
+
+        for (int i = 0; i < layout.Count; i++)
+        {
+            int stackIndex = i / stackHeight;
+            int levelIndex = i % stackHeight;
+
+            float baseX = -totalWidth * 0.5f + stackIndex * stackBaseSpacing;
+            float horizontalDrift = levelIndex * stackStep.x;
+
+            float fanFactor = stackCount > 1 ? stackIndex / (float)(stackCount - 1) : 0.5f;
+            float rotation = Mathf.Lerp(-stackFanAngle, stackFanAngle, fanFactor) + levelIndex * stackTiltPerChip;
+
+            var entry = layout[i];
+            entry.position = new Vector2(baseX + horizontalDrift, levelIndex * stackStep.y);
+            entry.rotation = rotation;
+            layout[i] = entry;
+        }
+    }
+
+    private void CenterLayout(List<ChipLayoutEntry> layout)
+    {
+        if (layout == null || layout.Count == 0)
+            return;
+
+        float minX = float.MaxValue;
+        float maxX = float.MinValue;
+        for (int i = 0; i < layout.Count; i++)
+        {
+            minX = Mathf.Min(minX, layout[i].position.x);
+            maxX = Mathf.Max(maxX, layout[i].position.x);
+        }
+
+        float offsetX = (minX + maxX) * 0.5f;
+
+        for (int i = 0; i < layout.Count; i++)
+        {
+            var entry = layout[i];
+            var pos = entry.position;
+            pos.x -= offsetX;
+            entry.position = pos;
+            layout[i] = entry;
+        }
+    }
+
+    private void RenderLayout(List<ChipLayoutEntry> layout)
+    {
+        if (layout == null || layout.Count == 0)
+            return;
+
+        var ordered = layout
+            .OrderBy(entry => entry.position.y)
+            .ThenBy(entry => entry.position.x)
+            .ToList();
+
+        foreach (var entry in ordered)
+        {
+            var image = entry.image;
+            if (image == null)
+                continue;
+
+            var rt = image.rectTransform;
+            rt.SetParent(chipContainer, false);
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = entry.position;
+            rt.localRotation = Quaternion.Euler(0f, 0f, entry.rotation);
+            rt.localScale = Vector3.one;
+            rt.SetAsLastSibling();
+        }
     }
 
     private void PositionContainer()
@@ -380,6 +643,48 @@ public class BetChipDisplay : MonoBehaviour
         {
             resolvedParent = transform as RectTransform;
         }
+    }
+
+    private ChipVisual ResolveChipVisual(int value)
+    {
+        if (chipLookup != null && chipLookup.TryGetValue(value, out var visual) && visual.sprite != null)
+            return visual;
+
+        foreach (var chip in chipSet)
+        {
+            if (chip.value == value && chip.sprite != null)
+                return chip;
+        }
+
+        return chipSet.FirstOrDefault(c => c.sprite != null);
+    }
+
+    private int ResolveNearestChipValue(int minValue)
+    {
+        if (chipValuesAsc == null || chipValuesAsc.Length == 0)
+            return minValue;
+
+        for (int i = 0; i < chipValuesAsc.Length; i++)
+        {
+            if (chipValuesAsc[i] >= minValue)
+                return chipValuesAsc[i];
+        }
+
+        return chipValuesAsc[chipValuesAsc.Length - 1];
+    }
+
+    private ChipVisual GetSmallestChip()
+    {
+        if (chipSet == null || chipSet.Length == 0)
+            return default;
+
+        for (int i = chipSet.Length - 1; i >= 0; i--)
+        {
+            if (chipSet[i].sprite != null && chipSet[i].value > 0)
+                return chipSet[i];
+        }
+
+        return default;
     }
 
         public void EnsureChipSet()
@@ -533,26 +838,31 @@ public class BetChipDisplay : MonoBehaviour
             var parts = lower.Split('_');
             foreach (var part in parts.Reverse())
             {
+                if (int.TryParse(part, out var indexValue) && DefaultChipIndexValues.TryGetValue(indexValue, out var mapped))
+                    return mapped;
                 if (int.TryParse(part, out var parsed) && parsed > 0)
                     return parsed;
             }
         }
 
-        Debug.LogWarning($"BetChipDisplay: не удалось определить номинал для спрайта '{spriteName}', используем 100");
-        return 100;
+        if (WarnedSpriteNames.Add(spriteName))
+            Debug.LogWarning($"BetChipDisplay: не удалось определить номинал для спрайта '{spriteName}', используем 1000");
+        return 1000;
     }
 
     private struct ChipLayoutEntry
     {
-        public ChipLayoutEntry(Image image, Vector2 position, int value)
+        public ChipLayoutEntry(Image image, Vector2 position, int value, float rotation)
         {
             this.image = image;
             this.position = position;
             this.value = value;
+            this.rotation = rotation;
         }
 
         public Image image;
         public Vector2 position;
+        public float rotation;
         public int value;
     }
 }

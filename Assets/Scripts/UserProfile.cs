@@ -17,6 +17,7 @@ public class UserProfile
     
     [Header("Игровые данные")]
     public int chips; // Игровые фишки
+    public int XP; // Опыт игрока
     public int totalGamesPlayed;
     public int gamesWon;
     public int gamesLost;
@@ -60,6 +61,11 @@ public class UserProfile
     public int currentSessionGames;
     public DateTime sessionStartTime;
     
+    [Header("Ограничения пополнения")]
+    public int weeklyDepositLimit = 10000; // Недельный лимит пополнения
+    public int currentWeekDeposits = 0; // Пополнения за текущую неделю
+    public DateTime weekStartDate; // Начало текущей недели для отсчета лимита
+    
     public UserProfile()
     {
         username = "";
@@ -70,7 +76,8 @@ public class UserProfile
         isLoggedIn = false;
         
         // Игровые данные
-        chips = 10000; // Стартовые фишки
+        chips = 1000; // Стартовые фишки
+        XP = 0; // Стартовый опыт
         totalGamesPlayed = 0;
         gamesWon = 0;
         gamesLost = 0;
@@ -106,6 +113,11 @@ public class UserProfile
         currentSessionChips = 0;
         currentSessionGames = 0;
         sessionStartTime = DateTime.Now;
+        
+        // Ограничения пополнения
+        weeklyDepositLimit = 10000;
+        currentWeekDeposits = 0;
+        weekStartDate = GetStartOfWeek(DateTime.Now);
     }
     
     /// <summary>
@@ -252,6 +264,70 @@ public class UserProfile
         avatarId = CustomAvatarId;
         customAvatarPath = avatarPath;
         UnlockAvatar(avatarId);
+    }
+    
+    /// <summary>
+    /// Проверяет, можно ли пополнить на указанную сумму (не превышает недельный лимит)
+    /// </summary>
+    public bool CanDeposit(int amount)
+    {
+        CheckAndResetWeeklyLimit();
+        return (currentWeekDeposits + amount) <= weeklyDepositLimit;
+    }
+    
+    /// <summary>
+    /// Возвращает оставшуюся сумму для пополнения на этой неделе
+    /// </summary>
+    public int GetRemainingWeeklyDeposit()
+    {
+        CheckAndResetWeeklyLimit();
+        return Mathf.Max(0, weeklyDepositLimit - currentWeekDeposits);
+    }
+    
+    /// <summary>
+    /// Добавляет пополнение к недельному счетчику
+    /// </summary>
+    public bool AddDeposit(int amount)
+    {
+        CheckAndResetWeeklyLimit();
+        
+        if (!CanDeposit(amount))
+        {
+            Debug.LogWarning($"Попытка пополнить на {amount}, но превышен недельный лимит. Осталось: {GetRemainingWeeklyDeposit()}");
+            return false;
+        }
+        
+        currentWeekDeposits += amount;
+        chips += amount;
+        
+        Debug.Log($"Пополнение на {amount} фишек. Использовано за неделю: {currentWeekDeposits}/{weeklyDepositLimit}");
+        return true;
+    }
+    
+    /// <summary>
+    /// Проверяет, нужно ли сбросить недельный лимит (новая неделя)
+    /// </summary>
+    private void CheckAndResetWeeklyLimit()
+    {
+        DateTime currentWeekStart = GetStartOfWeek(DateTime.Now);
+        
+        if (currentWeekStart > weekStartDate)
+        {
+            // Новая неделя - сбрасываем счетчик
+            currentWeekDeposits = 0;
+            weekStartDate = currentWeekStart;
+            Debug.Log("Недельный лимит пополнений сброшен - началась новая неделя");
+        }
+    }
+    
+    /// <summary>
+    /// Возвращает начало недели (понедельник) для указанной даты
+    /// </summary>
+    public DateTime GetStartOfWeek(DateTime date)
+    {
+        // Получаем понедельник текущей недели
+        int daysFromMonday = ((int)date.DayOfWeek - 1 + 7) % 7;
+        return date.Date.AddDays(-daysFromMonday);
     }
 }
 

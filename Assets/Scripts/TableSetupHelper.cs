@@ -134,12 +134,14 @@ public class TableSetupHelper : MonoBehaviour
         stackTextComp.alignment = TextAnchor.MiddleCenter;
 
         // Создаем карты
+        Vector2 holeCardSize = new Vector2(65f, 95f); // Размер hole карт
+        
         GameObject hole1 = new GameObject("Hole1");
         hole1.transform.SetParent(seat.transform, false);
         RectTransform hole1Rect = hole1.AddComponent<RectTransform>();
         hole1Rect.anchorMin = new Vector2(0.3f, 0f);
         hole1Rect.anchorMax = new Vector2(0.3f, 0f);
-        hole1Rect.sizeDelta = new Vector2(20, 30);
+        hole1Rect.sizeDelta = holeCardSize;
         Image hole1Image = hole1.AddComponent<Image>();
         hole1Image.color = Color.white;
         hole1Image.enabled = false;
@@ -149,7 +151,7 @@ public class TableSetupHelper : MonoBehaviour
         RectTransform hole2Rect = hole2.AddComponent<RectTransform>();
         hole2Rect.anchorMin = new Vector2(0.7f, 0f);
         hole2Rect.anchorMax = new Vector2(0.7f, 0f);
-        hole2Rect.sizeDelta = new Vector2(20, 30);
+        hole2Rect.sizeDelta = holeCardSize;
         Image hole2Image = hole2.AddComponent<Image>();
         hole2Image.color = Color.white;
         hole2Image.enabled = false;

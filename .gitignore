@@ -104,3 +104,7 @@ InitTestScene*.unity*
 # Kiro IDE or custom folder
 .kiro/
 
+# Server build artifacts
+/Server/bin/
+/Server/obj/
+

@@ -30,6 +30,9 @@ public class PokerClient : MonoBehaviour
     public System.Action<string[]> OnPlayersListUpdated;
     public System.Action<bool> OnHandStateChanged;
     public System.Action<string, string, int> OnPlayerAction;
+    public System.Action<string, string> OnHoleCardsReceived; // card1, card2
+    public System.Action<string[]> OnCommunityCardsReceived; // массив карт
+    public System.Action<Dictionary<string, object>> OnGameStateReceived; // полное состояние игры
     
     private void Start()
     {
@@ -216,6 +219,15 @@ public class PokerClient : MonoBehaviour
                 case "game_state":
                     bool handActive = data.ContainsKey("hand_active") ? Convert.ToBoolean(data["hand_active"]) : false;
                     OnHandStateChanged?.Invoke(handActive);
+                    OnGameStateReceived?.Invoke(data);
+                    break;
+                    
+                case "hole_cards":
+                    string card1 = data.ContainsKey("card1") ? data["card1"].ToString() : "";
+                    string card2 = data.ContainsKey("card2") ? data["card2"].ToString() : "";
+                    OnHoleCardsReceived?.Invoke(card1, card2);
+                    if (enableDebugLogs)
+                        Debug.Log($"🃏 Получены карты: {card1}, {card2}");
                     break;
                     
                 case "error":
