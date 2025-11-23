@@ -119,6 +119,23 @@ namespace PokerServer
                 clients.Remove(client);
                 Console.WriteLine($"👋 Клиент отключен. Осталось клиентов: {clients.Count}");
             }
+            
+            // Удаляем из списка авторизованных пользователей
+            lock (authenticatedUsersLock)
+            {
+                var keysToRemove = new List<string>();
+                foreach (var kvp in authenticatedUsers)
+                {
+                    if (kvp.Value == client)
+                    {
+                        keysToRemove.Add(kvp.Key);
+                    }
+                }
+                foreach (var key in keysToRemove)
+                {
+                    authenticatedUsers.Remove(key);
+                }
+            }
         }
         
         public void BroadcastMessage(Dictionary<string, object> message, ClientConnection excludeClient = null)
@@ -413,6 +430,70 @@ namespace PokerServer
             }
             
             client.SendMessage(response);
+        }
+        
+        /// <summary>
+        /// Отправляет обновление данных о друзьях пользователю
+        /// </summary>
+        /// <summary>
+        /// Регистрирует авторизованного пользователя для получения уведомлений
+        /// </summary>
+        public void RegisterAuthenticatedUser(string username, ClientConnection client)
+        {
+            lock (authenticatedUsersLock)
+            {
+                authenticatedUsers[username.ToLower()] = client;
+                Console.WriteLine($"👤 Зарегистрирован авторизованный пользователь: {username}");
+            }
+        }
+        
+        /// <summary>
+        /// Удаляет авторизованного пользователя
+        /// </summary>
+        public void UnregisterAuthenticatedUser(string username)
+        {
+            lock (authenticatedUsersLock)
+            {
+                authenticatedUsers.Remove(username.ToLower());
+            }
+        }
+        
+        /// <summary>
+        /// Отправляет уведомление о новой заявке в друзья
+        /// </summary>
+        private void SendFriendRequestNotification(string toUsername, string fromUsername)
+        {
+            lock (authenticatedUsersLock)
+            {
+                if (authenticatedUsers.ContainsKey(toUsername.ToLower()))
+                {
+                    var recipientClient = authenticatedUsers[toUsername.ToLower()];
+                    if (recipientClient != null && recipientClient.IsConnected)
+                    {
+                        // Загружаем обновленные данные о заявках
+                        var user = userDatabase.GetUser(toUsername);
+                        if (user != null)
+                        {
+                            // Инициализируем списки, если они null
+                            if (user.Friends == null) user.Friends = new List<string>();
+                            if (user.IncomingFriendRequests == null) user.IncomingFriendRequests = new List<UserDatabase.FriendRequest>();
+                            if (user.OutgoingFriendRequests == null) user.OutgoingFriendRequests = new List<UserDatabase.FriendRequest>();
+                            
+                            var notification = new Dictionary<string, object>
+                            {
+                                {"type", "friend_request_notification"},
+                                {"from", fromUsername},
+                                {"friends", string.Join(",", user.Friends)},
+                                {"incoming_requests", SerializeFriendRequests(user.IncomingFriendRequests)},
+                                {"outgoing_requests", SerializeFriendRequests(user.OutgoingFriendRequests)}
+                            };
+                            
+                            recipientClient.SendMessage(notification);
+                            Console.WriteLine($"📬 Уведомление о заявке отправлено {toUsername} от {fromUsername}");
+                        }
+                    }
+                }
+            }
         }
         
         /// <summary>
