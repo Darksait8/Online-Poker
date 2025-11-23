@@ -220,7 +220,9 @@ namespace PokerServer
             string password = data.ContainsKey("password") ? data["password"].ToString() : "";
             
             Console.WriteLine($"🔐 Попытка входа: {username}");
+            Console.WriteLine($"   - Соединение клиента: IsConnected={client?.IsConnected}, ClientId={client?.ClientId}");
             var result = userDatabase.Login(username, password);
+            Console.WriteLine($"   - Результат логина: Success={result.Success}, Message={result.Message}");
             
             var response = new Dictionary<string, object>
             {
@@ -255,14 +257,16 @@ namespace PokerServer
                 Console.WriteLine($"   - Соединение клиента: IsConnected={client?.IsConnected}");
                 
                 // Регистрируем пользователя для получения уведомлений
+                Console.WriteLine($"   - Проверка соединения перед регистрацией: client != null = {client != null}, IsConnected = {client?.IsConnected}");
                 if (client != null && client.IsConnected)
                 {
+                    Console.WriteLine($"   - Регистрирую пользователя {result.User.Username}...");
                     RegisterAuthenticatedUser(result.User.Username, client);
                     Console.WriteLine($"✅ Пользователь {result.User.Username} зарегистрирован при логине");
                 }
                 else
                 {
-                    Console.WriteLine($"❌ Не могу зарегистрировать {result.User.Username} - соединение не активно");
+                    Console.WriteLine($"❌ Не могу зарегистрировать {result.User.Username} - соединение не активно (client={client != null}, IsConnected={client?.IsConnected})");
                 }
             }
             
