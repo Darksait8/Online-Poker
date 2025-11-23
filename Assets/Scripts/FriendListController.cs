@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -58,7 +59,111 @@ public class FriendListController : MonoBehaviour
     private void OnAddFriendClicked()
     {
         string candidate = addFriendInput != null ? addFriendInput.text : string.Empty;
+        candidate = candidate?.Trim();
+        
+        if (string.IsNullOrEmpty(candidate))
+        {
+            SetStatus("Введите имя пользователя.");
+            return;
+        }
+        
+        // Пытаемся добавить друга через сервер, если включена серверная авторизация
+        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+        if (authSync != null)
+        {
+            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            bool useServerAuth = useServerAuthField != null && 
+                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
+            
+            if (useServerAuth)
+            {
+                // Проверяем пользователя на сервере асинхронно
+                StartCoroutine(CheckUserAndAddFriend(candidate, authSync));
+                return;
+            }
+        }
+        
+        // Fallback на локальную проверку
         if (AuthManager.TrySendFriendRequest(candidate, out string error))
+        {
+            SetStatus("Заявка отправлена");
+            if (addFriendInput != null)
+                addFriendInput.text = string.Empty;
+        }
+        else
+        {
+            SetStatus(error);
+        }
+    }
+    
+    private System.Collections.IEnumerator CheckUserAndAddFriend(string username, AuthServerSync authSync)
+    {
+        SetStatus("Проверка пользователя...");
+        
+        var authClientField = typeof(AuthServerSync).GetField("authClient", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
+        
+        if (authClient == null)
+        {
+            SetStatus("Ошибка: AuthServerClient не найден");
+            yield break;
+        }
+        
+        // Проверяем подключение
+        if (!authClient.IsConnected())
+        {
+            authClient.Connect();
+            float timeout = 5f;
+            float elapsed = 0f;
+            while (!authClient.IsConnected() && elapsed < timeout)
+            {
+                yield return new WaitForSeconds(0.1f);
+                elapsed += 0.1f;
+            }
+            
+            if (!authClient.IsConnected())
+            {
+                SetStatus("Не удалось подключиться к серверу");
+                yield break;
+            }
+        }
+        
+        // Запрашиваем профиль пользователя
+        bool requestCompleted = false;
+        bool userExists = false;
+        Dictionary<string, object> userData = null;
+        
+        System.Action<bool, Dictionary<string, object>> handler = null;
+        handler = (success, data) =>
+        {
+            authClient.OnProfileResponse -= handler;
+            userExists = success && data != null;
+            userData = data;
+            requestCompleted = true;
+        };
+        
+        authClient.OnProfileResponse += handler;
+        authClient.GetProfile(username);
+        
+        // Ждем ответа
+        float waitTimeout = 5f;
+        float waitElapsed = 0f;
+        while (!requestCompleted && waitElapsed < waitTimeout)
+        {
+            yield return new WaitForSeconds(0.1f);
+            waitElapsed += 0.1f;
+        }
+        
+        if (!userExists)
+        {
+            SetStatus("Пользователь не найден");
+            yield break;
+        }
+        
+        // Пользователь найден на сервере, добавляем в друзья
+        if (AuthManager.TrySendFriendRequest(username, out string error))
         {
             SetStatus("Заявка отправлена");
             if (addFriendInput != null)

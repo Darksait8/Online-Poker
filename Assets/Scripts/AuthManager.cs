@@ -459,10 +459,16 @@ public static class AuthManager
         }
 
         string resolvedUsername = ResolveUsernameCaseInsensitive(targetUsername);
+        
+        // Если не найден локально, проверяем на сервере
         if (resolvedUsername == null)
         {
-            error = "Пользователь не найден.";
-            return false;
+            resolvedUsername = CheckUserExistsOnServer(targetUsername);
+            if (resolvedUsername == null)
+            {
+                error = "Пользователь не найден.";
+                return false;
+            }
         }
 
         EnsureSocialCollections(_currentUser);
@@ -477,11 +483,18 @@ public static class AuthManager
             return false;
         }
 
+        // Пытаемся загрузить профиль пользователя
         UserProfile targetProfile = UserDataManager.LoadUserProfile(resolvedUsername);
+        
+        // Если не найден локально, пытаемся загрузить с сервера
         if (targetProfile == null)
         {
-            error = "Не удалось загрузить профиль пользователя.";
-            return false;
+            targetProfile = LoadUserProfileFromServer(resolvedUsername);
+            if (targetProfile == null)
+            {
+                error = "Пользователь не найден.";
+                return false;
+            }
         }
 
         EnsureSocialCollections(targetProfile);
@@ -696,8 +709,94 @@ public static class AuthManager
 
     private static string ResolveUsernameCaseInsensitive(string target)
     {
+        // Проверяем локальные данные
         var usernames = UserDataManager.GetAllUsernames();
         return usernames.FirstOrDefault(u => string.Equals(u, target, StringComparison.OrdinalIgnoreCase));
+    }
+    
+    /// <summary>
+    /// Проверяет существование пользователя на сервере
+    /// </summary>
+    private static string CheckUserExistsOnServer(string targetUsername)
+    {
+        AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
+        if (authSync == null)
+            return null;
+        
+        var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        bool useServerAuth = useServerAuthField != null && 
+                            (bool)(useServerAuthField.GetValue(authSync) ?? false);
+        
+        if (!useServerAuth)
+            return null;
+        
+        var authClientField = typeof(AuthServerSync).GetField("authClient", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
+        
+        if (authClient == null || !authClient.IsConnected())
+            return null;
+        
+        // Возвращаем targetUsername для проверки через GetProfile
+        return targetUsername;
+    }
+    
+    /// <summary>
+    /// Загружает профиль пользователя с сервера
+    /// </summary>
+    private static UserProfile LoadUserProfileFromServer(string username)
+    {
+        AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
+        if (authSync == null)
+            return null;
+        
+        var authClientField = typeof(AuthServerSync).GetField("authClient", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
+        
+        if (authClient == null || !authClient.IsConnected())
+            return null;
+        
+        // Делаем синхронный запрос (в реальности это должно быть асинхронно)
+        UserProfile profile = null;
+        bool requestCompleted = false;
+        
+        System.Action<bool, Dictionary<string, object>> handler = null;
+        handler = (success, data) =>
+        {
+            authClient.OnProfileResponse -= handler;
+            if (success && data != null)
+            {
+                profile = new UserProfile
+                {
+                    username = data.ContainsKey("username") ? data["username"].ToString() : username,
+                    email = data.ContainsKey("email") ? data["email"].ToString() : "",
+                    passwordHash = "",
+                    registrationDate = DateTime.Parse(data.ContainsKey("registration_date") ? data["registration_date"].ToString() : DateTime.Now.ToString()),
+                    lastLoginDate = DateTime.Now,
+                    isLoggedIn = false,
+                    chips = data.ContainsKey("chips") ? Convert.ToInt32(data["chips"]) : 1000,
+                    XP = data.ContainsKey("xp") ? Convert.ToInt32(data["xp"]) : 0
+                };
+                EnsureSocialCollections(profile);
+            }
+            requestCompleted = true;
+        };
+        
+        authClient.OnProfileResponse += handler;
+        authClient.GetProfile(username);
+        
+        // Ждем ответа (в реальности это должно быть асинхронно через корутину)
+        float timeout = 3f;
+        float elapsed = 0f;
+        while (!requestCompleted && elapsed < timeout)
+        {
+            System.Threading.Thread.Sleep(100);
+            elapsed += 0.1f;
+        }
+        
+        return profile;
     }
 
     private static void EnsureFriendsList(UserProfile profile)
