@@ -870,7 +870,7 @@ public static class AuthManager
         };
     }
 
-    private static void NotifySocialChanged()
+    public static void NotifySocialChanged()
     {
         OnFriendsChanged?.Invoke(GetFriends().ToList());
         OnFriendRequestsChanged?.Invoke();
