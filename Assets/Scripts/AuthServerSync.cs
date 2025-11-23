@@ -71,6 +71,17 @@ public class AuthServerSync : MonoBehaviour
             
             if (authClient.IsConnected())
             {
+                // Синхронизируем заявки с сервера при старте
+                var currentUser = AuthManager.CurrentUser;
+                if (currentUser != null)
+                {
+                    Debug.Log($"AuthServerSync: Синхронизирую заявки для {currentUser.username} при старте");
+                    SyncFriendDataFromServer(currentUser.username);
+                }
+            }
+            
+            if (authClient.IsConnected())
+            {
                 Debug.Log("AuthServerSync: Подключен для получения уведомлений");
             }
             else
@@ -239,6 +250,11 @@ public class AuthServerSync : MonoBehaviour
                     XP = data.ContainsKey("xp") ? Convert.ToInt32(data["xp"]) : 0
                 };
                 
+                // ВАЖНО: Инициализируем списки заявок ПЕРЕД парсингом
+                profile.incomingFriendRequests = new List<FriendRequestData>();
+                profile.outgoingFriendRequests = new List<FriendRequestData>();
+                profile.friends = new List<string>();
+                
                 profile.StartNewSession();
                 
                 // Синхронизируем заявки в друзья с сервера
@@ -312,19 +328,32 @@ public class AuthServerSync : MonoBehaviour
                     }
                 }
                 
+                // ВАЖНО: Убеждаемся, что списки не null перед сохранением
+                if (profile.incomingFriendRequests == null)
+                    profile.incomingFriendRequests = new List<FriendRequestData>();
+                if (profile.outgoingFriendRequests == null)
+                    profile.outgoingFriendRequests = new List<FriendRequestData>();
+                if (profile.friends == null)
+                    profile.friends = new List<string>();
+                
+                Debug.Log($"AuthServerSync: ФИНАЛЬНАЯ ПРОВЕРКА ПЕРЕД СОХРАНЕНИЕМ:");
+                Debug.Log($"  - Входящих заявок: {profile.incomingFriendRequests.Count}");
+                foreach (var req in profile.incomingFriendRequests)
+                {
+                    Debug.Log($"    * {req.from} -> {req.to}");
+                }
+                Debug.Log($"  - Исходящих заявок: {profile.outgoingFriendRequests.Count}");
+                foreach (var req in profile.outgoingFriendRequests)
+                {
+                    Debug.Log($"    * {req.from} -> {req.to}");
+                }
+                
                 AuthManager.SetCurrentUser(profile);
                 UserDataManager.SaveUserProfile(profile);
                 
                 // Проверяем заявки после SetCurrentUser
                 var currentUser = AuthManager.CurrentUser;
                 Debug.Log($"AuthServerSync: После SetCurrentUser - входящих: {currentUser?.incomingFriendRequests?.Count ?? 0}, исходящих: {currentUser?.outgoingFriendRequests?.Count ?? 0}");
-                if (currentUser != null && currentUser.incomingFriendRequests != null && currentUser.incomingFriendRequests.Count > 0)
-                {
-                    foreach (var req in currentUser.incomingFriendRequests)
-                    {
-                        Debug.Log($"AuthServerSync: Входящая заявка в CurrentUser: {req.from} -> {req.to}");
-                    }
-                }
                 
                 // Уведомляем UI об обновлении заявок
                 AuthManager.NotifySocialChanged();
@@ -332,10 +361,17 @@ public class AuthServerSync : MonoBehaviour
                 
                 // Проверяем заявки через AuthManager
                 var incomingFromManager = AuthManager.GetIncomingFriendRequests();
+                var outgoingFromManager = AuthManager.GetOutgoingFriendRequests();
                 Debug.Log($"AuthServerSync: GetIncomingFriendRequests вернул {incomingFromManager.Count} заявок");
+                Debug.Log($"AuthServerSync: GetOutgoingFriendRequests вернул {outgoingFromManager.Count} заявок");
+                
                 foreach (var req in incomingFromManager)
                 {
-                    Debug.Log($"AuthServerSync: Заявка из AuthManager: {req.from} -> {req.to}");
+                    Debug.Log($"AuthServerSync: Входящая заявка из AuthManager: {req.from} -> {req.to}");
+                }
+                foreach (var req in outgoingFromManager)
+                {
+                    Debug.Log($"AuthServerSync: Исходящая заявка из AuthManager: {req.from} -> {req.to}");
                 }
                 
                 // Убеждаемся, что соединение остается активным для получения уведомлений
@@ -655,6 +691,40 @@ public class AuthServerSync : MonoBehaviour
         {
             Debug.LogWarning("AuthServerSync: Не удалось подключиться для регистрации уведомлений");
         }
+    }
+    
+    /// <summary>
+    /// Синхронизирует данные о друзьях и заявках с сервера
+    /// </summary>
+    private void SyncFriendDataFromServer(string username)
+    {
+        if (!authClient.IsConnected())
+        {
+            Debug.LogWarning("AuthServerSync: Не могу синхронизировать заявки - нет соединения");
+            return;
+        }
+        
+        Debug.Log($"AuthServerSync: Запрашиваю данные о друзьях для {username}");
+        
+        // Подписываемся на ответ
+        System.Action<bool, Dictionary<string, object>> handler = null;
+        handler = (success, data) =>
+        {
+            authClient.OnFriendDataResponse -= handler;
+            
+            if (success && data != null)
+            {
+                Debug.Log("AuthServerSync: Получены данные о друзьях с сервера, обновляю профиль");
+                HandleFriendDataUpdate(data);
+            }
+            else
+            {
+                Debug.LogWarning("AuthServerSync: Не удалось получить данные о друзьях с сервера");
+            }
+        };
+        
+        authClient.OnFriendDataResponse += handler;
+        authClient.GetFriendData(username);
     }
     
     public void SetServerAddress(string host, int port)

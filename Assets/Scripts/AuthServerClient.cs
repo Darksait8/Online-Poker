@@ -35,6 +35,7 @@ public class AuthServerClient : MonoBehaviour
     public System.Action<bool, List<Dictionary<string, object>>> OnAllUsersResponse;
     public System.Action<Dictionary<string, object>> OnFriendRequestNotification;
     public System.Action<Dictionary<string, object>> OnFriendDataUpdate;
+    public System.Action<bool, Dictionary<string, object>> OnFriendDataResponse;
     
     private void Update()
     {
@@ -467,6 +468,16 @@ public class AuthServerClient : MonoBehaviour
                         if (enableDebugLogs)
                             Debug.Log("AuthServerClient: Вызываю OnFriendDataUpdate");
                         OnFriendDataUpdate?.Invoke(messageData);
+                    });
+                    break;
+                    
+                case "friend_get_data_response":
+                    // Ответ на запрос данных о друзьях
+                    bool friendDataSuccess = data.ContainsKey("success") && Convert.ToBoolean(data["success"]);
+                    if (enableDebugLogs)
+                        Debug.Log($"AuthServerClient: Получен ответ friend_get_data_response, success: {friendDataSuccess}");
+                    ExecuteOnMainThread(() => {
+                        OnFriendDataResponse?.Invoke(friendDataSuccess, messageData);
                     });
                     break;
                     
