@@ -14,7 +14,17 @@
     "Email": "igor@gmail.com",
     "PasswordHash": "jZae727K08KaOmKSgOaGzww/XVqGr/PKEgIMkjrcbJI=",
     "RegistrationDate": "2025-11-23T17:21:41.2075837+03:00",
-    "LastLoginDate": "2025-11-23T17:21:41.2075904+03:00",
+    "LastLoginDate": "2025-11-23T17:31:22.138193+03:00",
+    "Chips": 1000,
+    "XP": 0,
+    "Level": 1
+  },
+  "artem": {
+    "Username": "artem",
+    "Email": "artem@gmail.com",
+    "PasswordHash": "jZae727K08KaOmKSgOaGzww/XVqGr/PKEgIMkjrcbJI=",
+    "RegistrationDate": "2025-11-23T17:29:57.2182059+03:00",
+    "LastLoginDate": "2025-11-23T17:29:57.2182123+03:00",
     "Chips": 1000,
     "XP": 0,
     "Level": 1
