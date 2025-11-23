@@ -16,16 +16,28 @@ namespace PokerServer
     public class SimpleSyncServer
     {
         private HttpListener listener;
-        private Dictionary<string, UserDatabase.UserData> users;
+        private Dictionary<string, UserData> users;
         private string dataFilePath;
         private string apiKey;
         private bool isRunning;
+        
+        public class UserData
+        {
+            public string Username { get; set; } = "";
+            public string Email { get; set; } = "";
+            public string PasswordHash { get; set; } = "";
+            public DateTime RegistrationDate { get; set; }
+            public DateTime LastLoginDate { get; set; }
+            public int Chips { get; set; }
+            public int XP { get; set; }
+            public int Level { get; set; }
+        }
         
         public SimpleSyncServer(int port = 8889, string dataFilePath = "sync_users.json", string apiKey = null)
         {
             this.dataFilePath = dataFilePath;
             this.apiKey = apiKey ?? "default-key-change-me";
-            this.users = new Dictionary<string, UserDatabase.UserData>();
+            this.users = new Dictionary<string, UserData>();
             
             listener = new HttpListener();
             listener.Prefixes.Add($"http://*:{port}/");
@@ -112,7 +124,7 @@ namespace PokerServer
                     using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
                     {
                         string json = reader.ReadToEnd();
-                        var newUsers = JsonSerializer.Deserialize<Dictionary<string, UserDatabase.UserData>>(json);
+                        var newUsers = JsonSerializer.Deserialize<Dictionary<string, UserData>>(json);
                         
                         if (newUsers != null)
                         {
@@ -150,7 +162,7 @@ namespace PokerServer
                 if (File.Exists(dataFilePath))
                 {
                     string json = File.ReadAllText(dataFilePath);
-                    var loaded = JsonSerializer.Deserialize<Dictionary<string, UserDatabase.UserData>>(json);
+                    var loaded = JsonSerializer.Deserialize<Dictionary<string, UserData>>(json);
                     if (loaded != null)
                     {
                         users = loaded;
