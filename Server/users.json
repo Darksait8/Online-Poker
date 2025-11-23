@@ -4,12 +4,18 @@
     "Email": "misha@gmail.com",
     "PasswordHash": "jZae727K08KaOmKSgOaGzww/XVqGr/PKEgIMkjrcbJI=",
     "RegistrationDate": "2025-11-23T17:11:02.9270632+03:00",
-    "LastLoginDate": "2025-11-23T17:18:55.5517139+03:00",
+    "LastLoginDate": "2025-11-24T00:20:34.6674479+03:00",
     "Chips": 1000,
     "XP": 0,
     "Level": 1,
     "Friends": [],
-    "IncomingFriendRequests": [],
+    "IncomingFriendRequests": [
+      {
+        "From": "artem",
+        "To": "misha",
+        "CreatedAt": "2025-11-24T00:20:21.9866471+03:00"
+      }
+    ],
     "OutgoingFriendRequests": []
   },
   "igor": {
@@ -17,7 +23,7 @@
     "Email": "igor@gmail.com",
     "PasswordHash": "jZae727K08KaOmKSgOaGzww/XVqGr/PKEgIMkjrcbJI=",
     "RegistrationDate": "2025-11-23T17:21:41.2075837+03:00",
-    "LastLoginDate": "2025-11-24T00:11:59.4023269+03:00",
+    "LastLoginDate": "2025-11-24T00:20:56.1288363+03:00",
     "Chips": 1000,
     "XP": 0,
     "Level": 1,
@@ -47,6 +53,11 @@
         "From": "artem",
         "To": "igor",
         "CreatedAt": "2025-11-23T23:46:53.3789699+03:00"
+      },
+      {
+        "From": "artem",
+        "To": "misha",
+        "CreatedAt": "2025-11-24T00:20:21.9866471+03:00"
       }
     ]
   }
