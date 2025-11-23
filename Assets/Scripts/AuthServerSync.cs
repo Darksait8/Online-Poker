@@ -307,6 +307,10 @@ public class AuthServerSync : MonoBehaviour
                 
                 Debug.Log($"AuthServerSync: Профиль сохранен. Входящих заявок: {profile.incomingFriendRequests?.Count ?? 0}, Исходящих: {profile.outgoingFriendRequests?.Count ?? 0}");
                 
+                // Уведомляем UI об обновлении заявок
+                AuthManager.NotifySocialChanged();
+                Debug.Log("AuthServerSync: Вызван NotifySocialChanged для обновления UI");
+                
                 // Убеждаемся, что соединение остается активным для получения уведомлений
                 if (!authClient.IsConnected())
                 {

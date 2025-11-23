@@ -42,6 +42,7 @@ public class FriendRequestCenterController : MonoBehaviour
 
     public void Refresh()
     {
+        Debug.Log("FriendRequestCenterController: Refresh вызван");
         PopulateIncoming();
         PopulateOutgoing();
     }
@@ -55,11 +56,22 @@ public class FriendRequestCenterController : MonoBehaviour
     {
         ClearItems(incomingItems);
         var incoming = AuthManager.GetIncomingFriendRequests();
-        if (incomingRoot == null || incomingTemplate == null)
+        Debug.Log($"FriendRequestCenterController: PopulateIncoming - получено {incoming.Count} входящих заявок");
+        
+        if (incomingRoot == null)
+        {
+            Debug.LogWarning("FriendRequestCenterController: incomingRoot == null");
             return;
+        }
+        if (incomingTemplate == null)
+        {
+            Debug.LogWarning("FriendRequestCenterController: incomingTemplate == null");
+            return;
+        }
 
         foreach (FriendRequestData request in incoming)
         {
+            Debug.Log($"FriendRequestCenterController: Создаю элемент для заявки от {request.from}");
             GameObject item = Instantiate(incomingTemplate, incomingRoot);
             item.SetActive(true);
             incomingItems.Add(item);
@@ -67,15 +79,23 @@ public class FriendRequestCenterController : MonoBehaviour
             Text label = item.transform.Find("Name")?.GetComponent<Text>() ?? item.GetComponentInChildren<Text>();
             if (label != null)
                 label.text = request.from;
+            else
+                Debug.LogWarning("FriendRequestCenterController: Не найден Text компонент для имени");
 
             Button acceptButton = item.transform.Find("AcceptButton")?.GetComponent<Button>();
             if (acceptButton != null)
                 acceptButton.onClick.AddListener(() => OnAcceptClicked(request.from));
+            else
+                Debug.LogWarning("FriendRequestCenterController: Не найдена кнопка AcceptButton");
 
             Button declineButton = item.transform.Find("DeclineButton")?.GetComponent<Button>();
             if (declineButton != null)
                 declineButton.onClick.AddListener(() => OnDeclineClicked(request.from));
+            else
+                Debug.LogWarning("FriendRequestCenterController: Не найдена кнопка DeclineButton");
         }
+        
+        Debug.Log($"FriendRequestCenterController: PopulateIncoming завершено, создано {incomingItems.Count} элементов");
     }
 
     private void PopulateOutgoing()
