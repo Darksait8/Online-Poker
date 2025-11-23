@@ -154,8 +154,15 @@ public class AuthServerClient : MonoBehaviour
     /// </summary>
     public void Login(string username, string password)
     {
+        if (enableDebugLogs)
+            Debug.Log($"AuthServerClient: Попытка входа для {username}");
+        
         if (!EnsureConnected())
+        {
+            if (enableDebugLogs)
+                Debug.LogWarning("AuthServerClient: Не удалось подключиться для логина");
             return;
+        }
         
         var message = new Dictionary<string, object>
         {
@@ -163,6 +170,9 @@ public class AuthServerClient : MonoBehaviour
             {"username", username},
             {"password", password}
         };
+        
+        if (enableDebugLogs)
+            Debug.Log($"AuthServerClient: Отправляю auth_login для {username}");
         
         SendMessage(message);
     }
