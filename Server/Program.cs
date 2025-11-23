@@ -40,7 +40,7 @@ namespace PokerServer
             // Проверяем переменные окружения, если не указаны в аргументах
             if (!enableCloudSync)
             {
-                syncUrl = Environment.GetEnvironmentVariable("POKER_SYNC_URL");
+                syncUrl = Environment.GetEnvironmentVariable("POKER_SYNC_URL") ?? "";
                 enableCloudSync = !string.IsNullOrEmpty(syncUrl);
             }
             

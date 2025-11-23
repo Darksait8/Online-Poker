@@ -119,7 +119,7 @@ namespace PokerServer
             }
         }
         
-        public void BroadcastMessage(Dictionary<string, object> message, ClientConnection excludeClient = null)
+        public void BroadcastMessage(Dictionary<string, object> message, ClientConnection? excludeClient = null)
         {
             string json = SerializeMessage(message);
             byte[] data = Encoding.UTF8.GetBytes(json);

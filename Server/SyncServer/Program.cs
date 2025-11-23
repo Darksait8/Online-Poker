@@ -23,7 +23,7 @@ namespace SyncServer
             Console.WriteLine("═══════════════════════════════════════");
             Console.WriteLine();
             
-            int port = 8889;
+            int port = 9000; // Изменено на 9000, так как 8889 может требовать прав администратора
             string dataFilePath = "sync_users.json";
             string apiKey = "default-key-change-me";
             
