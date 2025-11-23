@@ -99,6 +99,9 @@ public class MainMenuUIController : MonoBehaviour
 
     private void Awake()
     {
+        // Убеждаемся, что AuthServerSync существует в сцене
+        EnsureAuthServerSync();
+        
         // Обновляем баланс всех пользователей при первом запуске (только если UI элементы привязаны)
         if (updateUsersBalanceOnStart && HasRequiredUIElements())
         {
@@ -1663,6 +1666,18 @@ public class MainMenuUIController : MonoBehaviour
         }
     }
 
+    private void EnsureAuthServerSync()
+    {
+        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+        if (authSync == null)
+        {
+            Debug.Log("MainMenuUIController: AuthServerSync не найден, создаю автоматически...");
+            GameObject syncObj = new GameObject("AuthServerSync");
+            authSync = syncObj.AddComponent<AuthServerSync>();
+            Debug.Log("MainMenuUIController: AuthServerSync создан");
+        }
+    }
+    
     private void EnsureLeaderboardPanel()
     {
         if (leaderboardPanel == null)
