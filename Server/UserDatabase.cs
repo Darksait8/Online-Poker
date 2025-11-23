@@ -146,6 +146,17 @@ namespace PokerServer
         }
         
         /// <summary>
+        /// Получение списка всех пользователей
+        /// </summary>
+        public List<UserData> GetAllUsers()
+        {
+            lock (usersLock)
+            {
+                return users.Values.ToList();
+            }
+        }
+        
+        /// <summary>
         /// Хеширование пароля
         /// </summary>
         private string HashPassword(string password)

@@ -1436,10 +1436,28 @@ public class MainMenuUIController : MonoBehaviour
 
     private void BuildLeaderboardSections(out List<LeaderboardEntry> topBalance, out List<LeaderboardEntry> topLevel)
     {
+        topBalance = new List<LeaderboardEntry>();
+        topLevel = new List<LeaderboardEntry>();
+        
+        // Пытаемся загрузить данные со сервера
+        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+        var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        bool useServerAuth = authSync != null && useServerAuthField != null && 
+                            (bool)(useServerAuthField.GetValue(authSync) ?? false);
+        
+        if (authSync != null && useServerAuth)
+        {
+            // Загружаем данные со сервера асинхронно
+            LoadLeaderboardFromServer(authSync);
+            return;
+        }
+        
+        // Fallback на локальные данные
         var profiles = AuthManager.GetAllProfilesSnapshot() ?? new List<UserProfile>();
         var current = AuthManager.CurrentUser;
 
-        Debug.Log($"MainMenuUIController: Загружено профилей для таблицы лидеров: {profiles.Count}");
+        Debug.Log($"MainMenuUIController: Загружено локальных профилей для таблицы лидеров: {profiles.Count}");
 
         // Убираем дубликаты по username (берем последний профиль для каждого username)
         var uniqueProfiles = profiles
@@ -1473,6 +1491,120 @@ public class MainMenuUIController : MonoBehaviour
             .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
             .Take(10)
             .ToList();
+    }
+    
+    private void LoadLeaderboardFromServer(AuthServerSync authSync)
+    {
+        // Получаем AuthServerClient через рефлексию
+        var authClientField = typeof(AuthServerSync).GetField("authClient", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
+        
+        if (authClient == null)
+        {
+            // Пытаемся найти компонент напрямую
+            authClient = authSync.GetComponent<AuthServerClient>();
+        }
+        
+        if (authClient == null)
+        {
+            Debug.LogWarning("MainMenuUIController: AuthServerClient не найден, используем локальные данные");
+            BuildLeaderboardSectionsFromLocal();
+            return;
+        }
+        
+        // Подписываемся на ответ
+        System.Action<bool, List<Dictionary<string, object>>> handler = null;
+        handler = (success, usersList) =>
+        {
+            authClient.OnAllUsersResponse -= handler;
+            
+            if (success && usersList != null && usersList.Count > 0)
+            {
+                var current = AuthManager.CurrentUser;
+                var entries = usersList.Select(userData => new LeaderboardEntry
+                {
+                    username = userData.ContainsKey("username") ? userData["username"].ToString() : "Игрок",
+                    level = userData.ContainsKey("level") ? Convert.ToInt32(userData["level"]) : 1,
+                    chips = userData.ContainsKey("chips") ? Convert.ToInt32(userData["chips"]) : 0,
+                    xp = userData.ContainsKey("xp") ? Convert.ToInt32(userData["xp"]) : 0,
+                    isCurrentUser = current != null && userData.ContainsKey("username") && 
+                                   string.Equals(userData["username"].ToString(), current.username, StringComparison.OrdinalIgnoreCase)
+                }).ToList();
+                
+                var topBalanceList = entries
+                    .OrderByDescending(e => e.chips)
+                    .ThenByDescending(e => e.level)
+                    .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
+                    .Take(10)
+                    .ToList();
+                
+                var topLevelList = entries
+                    .OrderByDescending(e => e.level)
+                    .ThenByDescending(e => e.xp)
+                    .ThenByDescending(e => e.chips)
+                    .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
+                    .Take(10)
+                    .ToList();
+                
+                Debug.Log($"MainMenuUIController: Загружено {usersList.Count} пользователей со сервера");
+                
+                // Обновляем панель лидеров
+                if (leaderboardPanel != null && leaderboardPanel.gameObject.activeSelf)
+                {
+                    leaderboardPanel.Show(topBalanceList, topLevelList);
+                }
+            }
+            else
+            {
+                Debug.LogWarning("MainMenuUIController: Не удалось загрузить пользователей со сервера, используем локальные данные");
+                BuildLeaderboardSectionsFromLocal();
+            }
+        };
+        
+        authClient.OnAllUsersResponse += handler;
+        authClient.GetAllUsers();
+    }
+    
+    private void BuildLeaderboardSectionsFromLocal()
+    {
+        var profiles = AuthManager.GetAllProfilesSnapshot() ?? new List<UserProfile>();
+        var current = AuthManager.CurrentUser;
+
+        var uniqueProfiles = profiles
+            .Where(p => !string.IsNullOrWhiteSpace(p?.username))
+            .GroupBy(p => p.username, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(p => p.lastLoginDate).First())
+            .ToList();
+
+        var entries = uniqueProfiles.Select(profile => new LeaderboardEntry
+        {
+            username = string.IsNullOrWhiteSpace(profile.username) ? "Игрок" : profile.username,
+            level = profile.Level,
+            chips = profile.chips,
+            xp = profile.XP,
+            isCurrentUser = current != null && string.Equals(profile.username, current.username, StringComparison.OrdinalIgnoreCase)
+        }).ToList();
+
+        var topBalanceList = entries
+            .OrderByDescending(e => e.chips)
+            .ThenByDescending(e => e.level)
+            .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+
+        var topLevelList = entries
+            .OrderByDescending(e => e.level)
+            .ThenByDescending(e => e.xp)
+            .ThenByDescending(e => e.chips)
+            .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        
+        if (leaderboardPanel != null && leaderboardPanel.gameObject.activeSelf)
+        {
+            leaderboardPanel.Show(topBalanceList, topLevelList);
+        }
     }
 
     private void EnsureLeaderboardPanel()
@@ -1514,11 +1646,30 @@ public class MainMenuUIController : MonoBehaviour
             return;
         }
 
-        BuildLeaderboardSections(out var topBalance, out var topLevel);
-        Debug.Log($"MainMenuUIController: Построены секции. По балансу: {topBalance?.Count ?? 0}, По уровню: {topLevel?.Count ?? 0}");
-
+        // Показываем панель сразу
         ShowOverlay(leaderboardPanel.gameObject);
-        leaderboardPanel.Show(topBalance, topLevel);
+        
+        // Пытаемся загрузить данные со сервера
+        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+        var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        bool useServerAuth = authSync != null && useServerAuthField != null && 
+                            (bool)(useServerAuthField.GetValue(authSync) ?? false);
+        
+        if (authSync != null && useServerAuth)
+        {
+            // Загружаем данные со сервера (панель обновится автоматически)
+            LoadLeaderboardFromServer(authSync);
+            // Показываем пустую панель, она обновится когда данные загрузятся
+            leaderboardPanel.Show(new List<LeaderboardEntry>(), new List<LeaderboardEntry>());
+        }
+        else
+        {
+            // Используем локальные данные
+            BuildLeaderboardSections(out var topBalance, out var topLevel);
+            Debug.Log($"MainMenuUIController: Построены секции. По балансу: {topBalance?.Count ?? 0}, По уровню: {topLevel?.Count ?? 0}");
+            leaderboardPanel.Show(topBalance, topLevel);
+        }
         
         // Убеждаемся, что панель на правильном слое
         leaderboardPanel.transform.SetAsLastSibling();

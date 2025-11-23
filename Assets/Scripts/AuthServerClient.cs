@@ -32,6 +32,7 @@ public class AuthServerClient : MonoBehaviour
     public System.Action<bool, string, Dictionary<string, object>> OnLoginResponse;
     public System.Action<bool, Dictionary<string, object>> OnProfileResponse;
     public System.Action<bool, string> OnUpdateResponse;
+    public System.Action<bool, List<Dictionary<string, object>>> OnAllUsersResponse;
     
     private void Update()
     {
@@ -181,6 +182,22 @@ public class AuthServerClient : MonoBehaviour
     }
     
     /// <summary>
+    /// Получение списка всех пользователей
+    /// </summary>
+    public void GetAllUsers()
+    {
+        if (!EnsureConnected())
+            return;
+        
+        var message = new Dictionary<string, object>
+        {
+            {"type", "auth_get_all_users"}
+        };
+        
+        SendMessage(message);
+    }
+    
+    /// <summary>
     /// Обновление профиля пользователя
     /// </summary>
     public void UpdateProfile(string username, int? chips = null, int? xp = null, int? level = null)
@@ -307,6 +324,50 @@ public class AuthServerClient : MonoBehaviour
                     // Выполняем в главном потоке
                     ExecuteOnMainThread(() => {
                         OnUpdateResponse?.Invoke(updateSuccess, updateMessage);
+                    });
+                    break;
+                    
+                case "auth_all_users_response":
+                    bool allUsersSuccess = data.ContainsKey("success") && Convert.ToBoolean(data["success"]);
+                    List<Dictionary<string, object>> usersList = new List<Dictionary<string, object>>();
+                    
+                    if (allUsersSuccess && data.ContainsKey("users"))
+                    {
+                        var usersData = data["users"];
+                        
+                        // Если это строка с разделителем |||
+                        if (usersData is string usersString && !string.IsNullOrEmpty(usersString))
+                        {
+                            string[] userJsonStrings = usersString.Split(new[] { "|||" }, StringSplitOptions.None);
+                            foreach (string userJson in userJsonStrings)
+                            {
+                                try
+                                {
+                                    var userDict = SimpleJSONParser.FromJSON(userJson);
+                                    usersList.Add(userDict);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.LogWarning($"Ошибка парсинга пользователя: {ex.Message}");
+                                }
+                            }
+                        }
+                        // Если это массив объектов (старый формат)
+                        else if (usersData is List<object> usersListObj)
+                        {
+                            foreach (var userObj in usersListObj)
+                            {
+                                if (userObj is Dictionary<string, object> userDict)
+                                {
+                                    usersList.Add(userDict);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Выполняем в главном потоке
+                    ExecuteOnMainThread(() => {
+                        OnAllUsersResponse?.Invoke(allUsersSuccess, usersList);
                     });
                     break;
             }

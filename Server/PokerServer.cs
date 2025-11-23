@@ -296,6 +296,41 @@ namespace PokerServer
             client.SendMessage(response);
         }
         
+        public void HandleAuthGetAllUsers(ClientConnection client, Dictionary<string, object> data)
+        {
+            var allUsers = userDatabase.GetAllUsers();
+            
+            var response = new Dictionary<string, object>
+            {
+                {"type", "auth_all_users_response"},
+                {"success", true},
+                {"count", allUsers.Count}
+            };
+            
+            // Добавляем список пользователей как массив JSON строк
+            var usersArray = new List<string>();
+            foreach (var user in allUsers)
+            {
+                var userDict = new Dictionary<string, object>
+                {
+                    {"username", user.Username},
+                    {"email", user.Email},
+                    {"chips", user.Chips},
+                    {"xp", user.XP},
+                    {"level", user.Level},
+                    {"registration_date", user.RegistrationDate.ToString("yyyy-MM-dd HH:mm:ss")}
+                };
+                
+                // Сериализуем каждого пользователя в JSON строку
+                string userJson = SerializeMessage(userDict);
+                usersArray.Add(userJson);
+            }
+            
+            response["users"] = string.Join("|||", usersArray); // Используем специальный разделитель
+            
+            client.SendMessage(response);
+        }
+        
         public void HandleJoinRequest(ClientConnection client, Dictionary<string, object> data)
         {
             string playerName = data.ContainsKey("name") ? data["name"].ToString() : "Игрок";

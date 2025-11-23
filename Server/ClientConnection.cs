@@ -82,6 +82,10 @@ namespace PokerServer
                         server.HandleAuthUpdateProfile(this, data);
                         break;
                         
+                    case "auth_get_all_users":
+                        server.HandleAuthGetAllUsers(this, data);
+                        break;
+                        
                     case "join":
                         server.HandleJoinRequest(this, data);
                         break;
