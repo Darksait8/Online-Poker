@@ -186,13 +186,23 @@ public class AuthServerClient : MonoBehaviour
     /// </summary>
     public void GetAllUsers()
     {
+        if (enableDebugLogs)
+            Debug.Log("AuthServerClient: GetAllUsers вызван");
+        
         if (!EnsureConnected())
+        {
+            if (enableDebugLogs)
+                Debug.LogWarning("AuthServerClient: Не удалось подключиться для GetAllUsers");
             return;
+        }
         
         var message = new Dictionary<string, object>
         {
             {"type", "auth_get_all_users"}
         };
+        
+        if (enableDebugLogs)
+            Debug.Log("AuthServerClient: Отправляю запрос auth_get_all_users");
         
         SendMessage(message);
     }
@@ -328,33 +338,54 @@ public class AuthServerClient : MonoBehaviour
                     break;
                     
                 case "auth_all_users_response":
+                    if (enableDebugLogs)
+                        Debug.Log("AuthServerClient: Получен ответ auth_all_users_response");
+                    
                     bool allUsersSuccess = data.ContainsKey("success") && Convert.ToBoolean(data["success"]);
                     List<Dictionary<string, object>> usersList = new List<Dictionary<string, object>>();
+                    
+                    if (enableDebugLogs)
+                        Debug.Log($"AuthServerClient: Success: {allUsersSuccess}, Has users key: {data.ContainsKey("users")}");
                     
                     if (allUsersSuccess && data.ContainsKey("users"))
                     {
                         var usersData = data["users"];
                         
+                        if (enableDebugLogs)
+                            Debug.Log($"AuthServerClient: Users data type: {usersData?.GetType().Name}, Value: {usersData}");
+                        
                         // Если это строка с разделителем |||
                         if (usersData is string usersString && !string.IsNullOrEmpty(usersString))
                         {
+                            if (enableDebugLogs)
+                                Debug.Log($"AuthServerClient: Парсинг строки пользователей, длина: {usersString.Length}");
+                            
                             string[] userJsonStrings = usersString.Split(new[] { "|||" }, StringSplitOptions.None);
+                            if (enableDebugLogs)
+                                Debug.Log($"AuthServerClient: Разделено на {userJsonStrings.Length} пользователей");
+                            
                             foreach (string userJson in userJsonStrings)
                             {
                                 try
                                 {
+                                    if (enableDebugLogs)
+                                        Debug.Log($"AuthServerClient: Парсинг пользователя: {userJson.Substring(0, Math.Min(50, userJson.Length))}...");
+                                    
                                     var userDict = SimpleJSONParser.FromJSON(userJson);
                                     usersList.Add(userDict);
                                 }
                                 catch (Exception ex)
                                 {
-                                    Debug.LogWarning($"Ошибка парсинга пользователя: {ex.Message}");
+                                    Debug.LogWarning($"AuthServerClient: Ошибка парсинга пользователя: {ex.Message}, JSON: {userJson.Substring(0, Math.Min(100, userJson.Length))}");
                                 }
                             }
                         }
                         // Если это массив объектов (старый формат)
                         else if (usersData is List<object> usersListObj)
                         {
+                            if (enableDebugLogs)
+                                Debug.Log($"AuthServerClient: Парсинг массива объектов, количество: {usersListObj.Count}");
+                            
                             foreach (var userObj in usersListObj)
                             {
                                 if (userObj is Dictionary<string, object> userDict)
@@ -364,6 +395,9 @@ public class AuthServerClient : MonoBehaviour
                             }
                         }
                     }
+                    
+                    if (enableDebugLogs)
+                        Debug.Log($"AuthServerClient: Обработано {usersList.Count} пользователей");
                     
                     // Выполняем в главном потоке
                     ExecuteOnMainThread(() => {

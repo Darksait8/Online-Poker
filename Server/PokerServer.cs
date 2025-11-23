@@ -300,6 +300,8 @@ namespace PokerServer
         {
             var allUsers = userDatabase.GetAllUsers();
             
+            Console.WriteLine($"📊 Запрос списка всех пользователей. Найдено: {allUsers.Count}");
+            
             var response = new Dictionary<string, object>
             {
                 {"type", "auth_all_users_response"},
@@ -324,10 +326,12 @@ namespace PokerServer
                 // Сериализуем каждого пользователя в JSON строку
                 string userJson = SerializeMessage(userDict);
                 usersArray.Add(userJson);
+                Console.WriteLine($"  - {user.Username}: {user.Chips} фишек, уровень {user.Level}");
             }
             
             response["users"] = string.Join("|||", usersArray); // Используем специальный разделитель
             
+            Console.WriteLine($"📤 Отправляю ответ с {usersArray.Count} пользователями");
             client.SendMessage(response);
         }
         

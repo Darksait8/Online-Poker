@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -1547,23 +1548,70 @@ public class MainMenuUIController : MonoBehaviour
                     .Take(10)
                     .ToList();
                 
-                Debug.Log($"MainMenuUIController: Загружено {usersList.Count} пользователей со сервера");
+                Debug.Log($"MainMenuUIController: Загружено {usersList.Count} пользователей со сервера. Top balance: {topBalanceList.Count}, Top level: {topLevelList.Count}");
                 
                 // Обновляем панель лидеров
-                if (leaderboardPanel != null && leaderboardPanel.gameObject.activeSelf)
+                if (leaderboardPanel != null)
                 {
                     leaderboardPanel.Show(topBalanceList, topLevelList);
+                    Debug.Log("MainMenuUIController: Панель лидеров обновлена");
+                }
+                else
+                {
+                    Debug.LogError("MainMenuUIController: leaderboardPanel is null!");
                 }
             }
             else
             {
-                Debug.LogWarning("MainMenuUIController: Не удалось загрузить пользователей со сервера, используем локальные данные");
+                Debug.LogWarning($"MainMenuUIController: Не удалось загрузить пользователей со сервера (success: {success}, count: {usersList?.Count ?? 0}), используем локальные данные");
                 BuildLeaderboardSectionsFromLocal();
             }
         };
         
+        Debug.Log("MainMenuUIController: Начинаю загрузку таблицы лидеров со сервера...");
+        
+        // Проверяем подключение
+        if (!authClient.IsConnected())
+        {
+            Debug.LogWarning("MainMenuUIController: AuthServerClient не подключен, пытаемся подключиться...");
+            authClient.Connect();
+            // Ждем немного для подключения
+            StartCoroutine(WaitAndLoadLeaderboard(authClient));
+            return;
+        }
+        
+        Debug.Log("MainMenuUIController: AuthServerClient подключен, запрашиваю список пользователей...");
+        
         authClient.OnAllUsersResponse += handler;
         authClient.GetAllUsers();
+        Debug.Log("MainMenuUIController: Запрос GetAllUsers отправлен");
+    }
+    
+    private IEnumerator WaitAndLoadLeaderboard(AuthServerClient authClient)
+    {
+        float timeout = 5f;
+        float elapsed = 0f;
+        
+        while (!authClient.IsConnected() && elapsed < timeout)
+        {
+            yield return new WaitForSeconds(0.1f);
+            elapsed += 0.1f;
+        }
+        
+        if (authClient.IsConnected())
+        {
+            Debug.Log("MainMenuUIController: Подключение установлено, загружаю таблицу лидеров...");
+            AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+            if (authSync != null)
+            {
+                LoadLeaderboardFromServer(authSync);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("MainMenuUIController: Не удалось подключиться к серверу, используем локальные данные");
+            BuildLeaderboardSectionsFromLocal();
+        }
     }
     
     private void BuildLeaderboardSectionsFromLocal()
