@@ -465,6 +465,12 @@ namespace PokerServer
         {
             lock (authenticatedUsersLock)
             {
+                Console.WriteLine($"📬 Попытка отправить уведомление {toUsername}. Всего авторизованных: {authenticatedUsers.Count}");
+                foreach (var kvp in authenticatedUsers)
+                {
+                    Console.WriteLine($"  - {kvp.Key}: подключен={kvp.Value?.IsConnected}");
+                }
+                
                 if (authenticatedUsers.ContainsKey(toUsername.ToLower()))
                 {
                     var recipientClient = authenticatedUsers[toUsername.ToLower()];
@@ -489,9 +495,21 @@ namespace PokerServer
                             };
                             
                             recipientClient.SendMessage(notification);
-                            Console.WriteLine($"📬 Уведомление о заявке отправлено {toUsername} от {fromUsername}");
+                            Console.WriteLine($"✅ Уведомление о заявке отправлено {toUsername} от {fromUsername}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"❌ Пользователь {toUsername} не найден в базе данных");
                         }
                     }
+                    else
+                    {
+                        Console.WriteLine($"❌ Клиент {toUsername} не подключен или равен null");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"❌ Пользователь {toUsername} не найден в списке авторизованных");
                 }
             }
         }
