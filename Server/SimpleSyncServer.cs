@@ -20,6 +20,7 @@ namespace PokerServer
         private string dataFilePath;
         private string apiKey;
         private bool isRunning;
+        private int port;
         
         public class UserData
         {
@@ -33,14 +34,18 @@ namespace PokerServer
             public int Level { get; set; }
         }
         
-        public SimpleSyncServer(int port = 8889, string dataFilePath = "sync_users.json", string apiKey = null)
+        public SimpleSyncServer(int port = 9000, string? dataFilePath = null, string? apiKey = null)
         {
-            this.dataFilePath = dataFilePath;
+            this.port = port;
+            this.dataFilePath = dataFilePath ?? "sync_users.json";
             this.apiKey = apiKey ?? "default-key-change-me";
             this.users = new Dictionary<string, UserData>();
             
             listener = new HttpListener();
-            listener.Prefixes.Add($"http://*:{port}/");
+            // Используем localhost вместо * для избежания проблем с правами доступа
+            // Для доступа из сети используйте http://+:8889/ (требует прав администратора или резервации URL)
+            // Пробуем сначала только один префикс, чтобы избежать конфликтов
+            listener.Prefixes.Add($"http://localhost:{port}/");
             
             LoadUsers();
         }
@@ -49,19 +54,76 @@ namespace PokerServer
         {
             try
             {
+                // Проверяем, не занят ли порт
+                if (IsPortInUse(GetPortFromPrefixes()))
+                {
+                    Console.WriteLine($"⚠️ Порт {GetPortFromPrefixes()} уже занят!");
+                    Console.WriteLine("Попробуйте использовать другой порт или освободите текущий.");
+                    return;
+                }
+                
                 listener.Start();
                 isRunning = true;
                 
-                Console.WriteLine($"🌐 Сервер синхронизации запущен на порту {listener.Prefixes.First().Replace("http://*:", "").Replace("/", "")}");
+                int portNumber = GetPortFromPrefixes();
+                Console.WriteLine($"🌐 Сервер синхронизации запущен на порту {portNumber}");
                 Console.WriteLine($"📁 Файл данных: {dataFilePath}");
                 Console.WriteLine($"🔑 API Key: {apiKey}");
+                Console.WriteLine($"📍 Доступен по адресу: http://localhost:{portNumber}/");
                 Console.WriteLine("Ожидание запросов...");
                 
                 _ = Task.Run(Listen);
             }
+            catch (HttpListenerException ex)
+            {
+                if (ex.ErrorCode == 5) // Access Denied
+                {
+                    Console.WriteLine($"❌ Ошибка: Отказано в доступе (код: {ex.ErrorCode})");
+                    Console.WriteLine();
+                    Console.WriteLine("РЕШЕНИЕ:");
+                    Console.WriteLine("1. Используйте другой порт (выше 1024, например 9000):");
+                    Console.WriteLine($"   dotnet run -- --port 9000 --key \"piska\"");
+                    Console.WriteLine();
+                    Console.WriteLine("2. Или выполните резервацию URL (от имени администратора):");
+                    Console.WriteLine($"   netsh http add urlacl url=http://localhost:{GetPortFromPrefixes()}/ user=Everyone");
+                    Console.WriteLine();
+                    Console.WriteLine("3. Или запустите от имени администратора");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ Ошибка запуска сервера синхронизации: {ex.Message} (код: {ex.ErrorCode})");
+                }
+            }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Ошибка запуска сервера синхронизации: {ex.Message}");
+                Console.WriteLine($"Тип ошибки: {ex.GetType().Name}");
+            }
+        }
+        
+        private int GetPortFromPrefixes()
+        {
+            return port;
+        }
+        
+        private bool IsPortInUse(int port)
+        {
+            try
+            {
+                using (var tcpListener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port))
+                {
+                    tcpListener.Start();
+                    tcpListener.Stop();
+                    return false;
+                }
+            }
+            catch (System.Net.Sockets.SocketException)
+            {
+                return true;
+            }
+            catch
+            {
+                return false; // Другие ошибки не означают, что порт занят
             }
         }
         
@@ -96,7 +158,7 @@ namespace PokerServer
             var response = context.Response;
             
             // Проверка API ключа
-            string providedKey = request.Headers["X-API-Key"];
+            string? providedKey = request.Headers["X-API-Key"];
             if (providedKey != apiKey)
             {
                 response.StatusCode = 401;

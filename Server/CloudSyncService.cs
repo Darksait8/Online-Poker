@@ -13,21 +13,21 @@ namespace PokerServer
     /// </summary>
     public class CloudSyncService
     {
-        private string syncUrl;
-        private string apiKey;
-        private HttpClient httpClient;
+        private string syncUrl = "";
+        private string apiKey = "";
+        private HttpClient? httpClient;
         private bool enabled;
         
-        public CloudSyncService(string syncUrl = null, string apiKey = null)
+        public CloudSyncService(string? syncUrl = null, string? apiKey = null)
         {
-            this.syncUrl = syncUrl ?? Environment.GetEnvironmentVariable("POKER_SYNC_URL");
-            this.apiKey = apiKey ?? Environment.GetEnvironmentVariable("POKER_SYNC_API_KEY");
+            this.syncUrl = syncUrl ?? Environment.GetEnvironmentVariable("POKER_SYNC_URL") ?? "";
+            this.apiKey = apiKey ?? Environment.GetEnvironmentVariable("POKER_SYNC_API_KEY") ?? "";
             this.enabled = !string.IsNullOrEmpty(this.syncUrl);
             
             if (enabled)
             {
                 httpClient = new HttpClient();
-                httpClient.DefaultRequestHeaders.Add("X-API-Key", this.apiKey ?? "");
+                httpClient.DefaultRequestHeaders.Add("X-API-Key", this.apiKey);
                 Console.WriteLine($"☁️ Облачная синхронизация включена: {this.syncUrl}");
             }
             else
@@ -45,6 +45,7 @@ namespace PokerServer
             
             try
             {
+                if (httpClient == null) return null;
                 var response = await httpClient.GetAsync($"{syncUrl}/users");
                 if (response.IsSuccessStatusCode)
                 {
@@ -75,6 +76,7 @@ namespace PokerServer
             
             try
             {
+                if (httpClient == null) return false;
                 string json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 
