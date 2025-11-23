@@ -23,7 +23,7 @@
     "Email": "igor@gmail.com",
     "PasswordHash": "jZae727K08KaOmKSgOaGzww/XVqGr/PKEgIMkjrcbJI=",
     "RegistrationDate": "2025-11-23T17:21:41.2075837+03:00",
-    "LastLoginDate": "2025-11-24T00:20:56.1288363+03:00",
+    "LastLoginDate": "2025-11-24T00:31:29.8165471+03:00",
     "Chips": 1000,
     "XP": 0,
     "Level": 1,
@@ -35,7 +35,13 @@
         "CreatedAt": "2025-11-23T23:46:53.3789699+03:00"
       }
     ],
-    "OutgoingFriendRequests": []
+    "OutgoingFriendRequests": [
+      {
+        "From": "igor",
+        "To": "artem",
+        "CreatedAt": "2025-11-24T00:31:40.8390668+03:00"
+      }
+    ]
   },
   "artem": {
     "Username": "artem",
@@ -47,7 +53,13 @@
     "XP": 0,
     "Level": 1,
     "Friends": [],
-    "IncomingFriendRequests": [],
+    "IncomingFriendRequests": [
+      {
+        "From": "igor",
+        "To": "artem",
+        "CreatedAt": "2025-11-24T00:31:40.8390668+03:00"
+      }
+    ],
     "OutgoingFriendRequests": [
       {
         "From": "artem",
