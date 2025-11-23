@@ -48,14 +48,17 @@ namespace SyncServer
             }
             
             // Проверяем переменные окружения
-            if (Environment.GetEnvironmentVariable("SYNC_PORT") != null)
-                int.TryParse(Environment.GetEnvironmentVariable("SYNC_PORT"), out port);
+            string? envPort = Environment.GetEnvironmentVariable("SYNC_PORT");
+            if (envPort != null)
+                int.TryParse(envPort, out port);
             
-            if (Environment.GetEnvironmentVariable("SYNC_DATA_FILE") != null)
-                dataFilePath = Environment.GetEnvironmentVariable("SYNC_DATA_FILE");
+            string? envDataFile = Environment.GetEnvironmentVariable("SYNC_DATA_FILE");
+            if (envDataFile != null)
+                dataFilePath = envDataFile;
             
-            if (Environment.GetEnvironmentVariable("SYNC_API_KEY") != null)
-                apiKey = Environment.GetEnvironmentVariable("SYNC_API_KEY");
+            string? envApiKey = Environment.GetEnvironmentVariable("SYNC_API_KEY");
+            if (envApiKey != null)
+                apiKey = envApiKey;
             
             var syncServer = new SimpleSyncServer(port, dataFilePath, apiKey);
             

@@ -33,14 +33,17 @@ namespace PokerServer
             public int Level { get; set; }
         }
         
-        public SimpleSyncServer(int port = 8889, string dataFilePath = "sync_users.json", string apiKey = null)
+        public SimpleSyncServer(int port = 8889, string dataFilePath = "sync_users.json", string? apiKey = null)
         {
-            this.dataFilePath = dataFilePath;
+            this.dataFilePath = dataFilePath ?? "sync_users.json";
             this.apiKey = apiKey ?? "default-key-change-me";
             this.users = new Dictionary<string, UserData>();
             
             listener = new HttpListener();
-            listener.Prefixes.Add($"http://*:{port}/");
+            // Используем localhost вместо * для избежания проблем с правами доступа
+            // Для доступа из сети используйте http://+:8889/ (требует прав администратора или резервации URL)
+            listener.Prefixes.Add($"http://localhost:{port}/");
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
             
             LoadUsers();
         }
@@ -52,9 +55,12 @@ namespace PokerServer
                 listener.Start();
                 isRunning = true;
                 
-                Console.WriteLine($"🌐 Сервер синхронизации запущен на порту {listener.Prefixes.First().Replace("http://*:", "").Replace("/", "")}");
+                string portInfo = listener.Prefixes.FirstOrDefault() ?? $"http://localhost:{port}/";
+                string portNumber = portInfo.Replace("http://localhost:", "").Replace("http://127.0.0.1:", "").Replace("http://*:", "").Replace("http://+:", "").Replace("/", "");
+                Console.WriteLine($"🌐 Сервер синхронизации запущен на порту {portNumber}");
                 Console.WriteLine($"📁 Файл данных: {dataFilePath}");
                 Console.WriteLine($"🔑 API Key: {apiKey}");
+                Console.WriteLine($"📍 Доступен по адресу: http://localhost:{portNumber}/");
                 Console.WriteLine("Ожидание запросов...");
                 
                 _ = Task.Run(Listen);
@@ -96,7 +102,7 @@ namespace PokerServer
             var response = context.Response;
             
             // Проверка API ключа
-            string providedKey = request.Headers["X-API-Key"];
+            string? providedKey = request.Headers["X-API-Key"];
             if (providedKey != apiKey)
             {
                 response.StatusCode = 401;
