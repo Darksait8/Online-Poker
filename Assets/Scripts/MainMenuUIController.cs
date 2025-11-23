@@ -233,8 +233,46 @@ public class MainMenuUIController : MonoBehaviour
         ApplyProfileAvatarToPreview(profile);
         UpdateCardThemePreview();
         UpdateChipLegendDisplay();
+        
+        // Обновляем таблицу лидеров, если она открыта
         if (leaderboardPanel != null && leaderboardPanel.gameObject.activeSelf)
         {
+            Debug.Log("MainMenuUIController: Профиль изменен, обновляю таблицу лидеров...");
+            RefreshLeaderboardIfOpen();
+        }
+    }
+    
+    /// <summary>
+    /// Обновляет таблицу лидеров, если она открыта
+    /// </summary>
+    private void RefreshLeaderboardIfOpen()
+    {
+        if (leaderboardPanel == null || !leaderboardPanel.gameObject.activeSelf)
+            return;
+        
+        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+        if (authSync != null)
+        {
+            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            bool useServerAuth = useServerAuthField != null && 
+                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
+            
+            if (useServerAuth)
+            {
+                Debug.Log("MainMenuUIController: Обновляю таблицу лидеров с сервера...");
+                LoadLeaderboardFromServer(authSync);
+            }
+            else
+            {
+                Debug.Log("MainMenuUIController: Обновляю таблицу лидеров из локальных данных...");
+                BuildLeaderboardSections(out var topBalance, out var topLevel);
+                leaderboardPanel.Show(topBalance, topLevel);
+            }
+        }
+        else
+        {
+            Debug.Log("MainMenuUIController: Обновляю таблицу лидеров из локальных данных (AuthServerSync не найден)...");
             BuildLeaderboardSections(out var topBalance, out var topLevel);
             leaderboardPanel.Show(topBalance, topLevel);
         }
@@ -1720,44 +1758,8 @@ public class MainMenuUIController : MonoBehaviour
         // Показываем панель сразу
         ShowOverlay(leaderboardPanel.gameObject);
         
-        // Пытаемся загрузить данные со сервера
-        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
-        Debug.Log($"MainMenuUIController: AuthServerSync найден: {authSync != null}");
-        
-        if (authSync != null)
-        {
-            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            bool useServerAuth = useServerAuthField != null && 
-                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
-            
-            Debug.Log($"MainMenuUIController: useServerAuth = {useServerAuth}");
-            
-            if (useServerAuth)
-            {
-                Debug.Log("MainMenuUIController: Серверная авторизация включена, загружаю данные со сервера...");
-                // Загружаем данные со сервера (панель обновится автоматически)
-                LoadLeaderboardFromServer(authSync);
-                // Показываем пустую панель, она обновится когда данные загрузятся
-                leaderboardPanel.Show(new List<LeaderboardEntry>(), new List<LeaderboardEntry>());
-            }
-            else
-            {
-                Debug.Log("MainMenuUIController: Серверная авторизация выключена, используем локальные данные");
-                // Используем локальные данные
-                BuildLeaderboardSections(out var topBalance, out var topLevel);
-                Debug.Log($"MainMenuUIController: Построены секции. По балансу: {topBalance?.Count ?? 0}, По уровню: {topLevel?.Count ?? 0}");
-                leaderboardPanel.Show(topBalance, topLevel);
-            }
-        }
-        else
-        {
-            Debug.LogWarning("MainMenuUIController: AuthServerSync не найден, используем локальные данные");
-            // Используем локальные данные
-            BuildLeaderboardSections(out var topBalance, out var topLevel);
-            Debug.Log($"MainMenuUIController: Построены секции. По балансу: {topBalance?.Count ?? 0}, По уровню: {topLevel?.Count ?? 0}");
-            leaderboardPanel.Show(topBalance, topLevel);
-        }
+        // ВСЕГДА загружаем свежие данные при открытии панели
+        RefreshLeaderboardIfOpen();
         
         // Убеждаемся, что панель на правильном слое
         leaderboardPanel.transform.SetAsLastSibling();
