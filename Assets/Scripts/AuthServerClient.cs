@@ -322,6 +322,26 @@ public class AuthServerClient : MonoBehaviour
         SendMessage(message);
     }
     
+    /// <summary>
+    /// Регистрация соединения для получения уведомлений
+    /// </summary>
+    public void RegisterForNotifications(string username)
+    {
+        if (!EnsureConnected())
+            return;
+        
+        var message = new Dictionary<string, object>
+        {
+            {"type", "register_for_notifications"},
+            {"username", username}
+        };
+        
+        if (enableDebugLogs)
+            Debug.Log($"AuthServerClient: Регистрирую соединение для получения уведомлений: {username}");
+        
+        SendMessage(message);
+    }
+    
     private bool EnsureConnected()
     {
         if (!isConnected || tcpClient == null || !tcpClient.Connected)

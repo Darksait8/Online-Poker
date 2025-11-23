@@ -405,7 +405,25 @@ namespace PokerServer
                     if (data != null)
                     {
                         users = data;
+                        
+                        // Инициализируем списки заявок для всех пользователей
+                        foreach (var user in users.Values)
+                        {
+                            if (user.Friends == null) user.Friends = new List<string>();
+                            if (user.IncomingFriendRequests == null) user.IncomingFriendRequests = new List<FriendRequest>();
+                            if (user.OutgoingFriendRequests == null) user.OutgoingFriendRequests = new List<FriendRequest>();
+                        }
+                        
                         Console.WriteLine($"📂 Загружено {users.Count} пользователей из базы данных");
+                        
+                        // Выводим информацию о заявках
+                        foreach (var user in users.Values)
+                        {
+                            if (user.IncomingFriendRequests.Count > 0 || user.OutgoingFriendRequests.Count > 0)
+                            {
+                                Console.WriteLine($"   - {user.Username}: входящих заявок: {user.IncomingFriendRequests.Count}, исходящих: {user.OutgoingFriendRequests.Count}");
+                            }
+                        }
                     }
                 }
                 else

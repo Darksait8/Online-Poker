@@ -243,8 +243,15 @@ namespace PokerServer
                 response["level"] = result.User.Level;
                 response["registration_date"] = result.User.RegistrationDate.ToString("yyyy-MM-dd HH:mm:ss");
                 response["friends"] = string.Join(",", result.User.Friends);
-                response["incoming_requests"] = SerializeFriendRequests(result.User.IncomingFriendRequests);
-                response["outgoing_requests"] = SerializeFriendRequests(result.User.OutgoingFriendRequests);
+                string incomingRequestsStr = SerializeFriendRequests(result.User.IncomingFriendRequests);
+                string outgoingRequestsStr = SerializeFriendRequests(result.User.OutgoingFriendRequests);
+                response["incoming_requests"] = incomingRequestsStr;
+                response["outgoing_requests"] = outgoingRequestsStr;
+                
+                Console.WriteLine($"📤 Отправляю данные логина для {result.User.Username}:");
+                Console.WriteLine($"   - Друзья: {result.User.Friends.Count}");
+                Console.WriteLine($"   - Входящие заявки: {result.User.IncomingFriendRequests.Count} ({incomingRequestsStr})");
+                Console.WriteLine($"   - Исходящие заявки: {result.User.OutgoingFriendRequests.Count} ({outgoingRequestsStr})");
                 
                 // Регистрируем пользователя для получения уведомлений
                 RegisterAuthenticatedUser(result.User.Username, client);
@@ -632,6 +639,20 @@ namespace PokerServer
             };
             
             client.SendMessage(response);
+        }
+        
+        public void HandleRegisterForNotifications(ClientConnection client, Dictionary<string, object> data)
+        {
+            string username = data.ContainsKey("username") ? data["username"].ToString() : "";
+            
+            if (string.IsNullOrEmpty(username))
+            {
+                Console.WriteLine("❌ Пустое имя пользователя при регистрации для уведомлений");
+                return;
+            }
+            
+            RegisterAuthenticatedUser(username, client);
+            Console.WriteLine($"📬 Пользователь {username} зарегистрирован для получения уведомлений");
         }
         
         private string SerializeFriendRequests(List<UserDatabase.FriendRequest> requests)

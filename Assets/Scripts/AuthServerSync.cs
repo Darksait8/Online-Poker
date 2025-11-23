@@ -248,39 +248,79 @@ public class AuthServerSync : MonoBehaviour
                     if (!string.IsNullOrEmpty(friendsStr))
                     {
                         profile.friends = new List<string>(friendsStr.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+                        Debug.Log($"AuthServerSync: Синхронизировано {profile.friends.Count} друзей");
                     }
+                    else
+                    {
+                        profile.friends = new List<string>();
+                    }
+                }
+                else
+                {
+                    profile.friends = new List<string>();
                 }
                 
                 if (data.ContainsKey("incoming_requests"))
                 {
                     string incomingStr = data["incoming_requests"].ToString();
+                    Debug.Log($"AuthServerSync: Получены входящие заявки при логине: '{incomingStr}'");
                     if (!string.IsNullOrEmpty(incomingStr))
                     {
                         profile.incomingFriendRequests = ParseFriendRequests(incomingStr);
+                        Debug.Log($"AuthServerSync: Распарсено {profile.incomingFriendRequests?.Count ?? 0} входящих заявок");
                     }
+                    else
+                    {
+                        profile.incomingFriendRequests = new List<FriendRequestData>();
+                        Debug.Log("AuthServerSync: Входящие заявки пусты");
+                    }
+                }
+                else
+                {
+                    profile.incomingFriendRequests = new List<FriendRequestData>();
+                    Debug.LogWarning("AuthServerSync: Ключ 'incoming_requests' не найден в данных логина");
                 }
                 
                 if (data.ContainsKey("outgoing_requests"))
                 {
                     string outgoingStr = data["outgoing_requests"].ToString();
+                    Debug.Log($"AuthServerSync: Получены исходящие заявки при логине: '{outgoingStr}'");
                     if (!string.IsNullOrEmpty(outgoingStr))
                     {
                         profile.outgoingFriendRequests = ParseFriendRequests(outgoingStr);
+                        Debug.Log($"AuthServerSync: Распарсено {profile.outgoingFriendRequests?.Count ?? 0} исходящих заявок");
                     }
+                    else
+                    {
+                        profile.outgoingFriendRequests = new List<FriendRequestData>();
+                        Debug.Log("AuthServerSync: Исходящие заявки пусты");
+                    }
+                }
+                else
+                {
+                    profile.outgoingFriendRequests = new List<FriendRequestData>();
+                    Debug.LogWarning("AuthServerSync: Ключ 'outgoing_requests' не найден в данных логина");
                 }
                 
                 AuthManager.SetCurrentUser(profile);
                 UserDataManager.SaveUserProfile(profile);
+                
+                Debug.Log($"AuthServerSync: Профиль сохранен. Входящих заявок: {profile.incomingFriendRequests?.Count ?? 0}, Исходящих: {profile.outgoingFriendRequests?.Count ?? 0}");
                 
                 // Убеждаемся, что соединение остается активным для получения уведомлений
                 if (!authClient.IsConnected())
                 {
                     Debug.LogWarning("AuthServerSync: Соединение потеряно после логина, переподключаюсь...");
                     authClient.Connect();
+                    
+                    // Ждем подключения
+                    StartCoroutine(WaitAndRegisterForNotifications(profile.username));
                 }
                 else
                 {
-                    Debug.Log("AuthServerSync: Соединение активно, готов к получению уведомлений");
+                    Debug.Log("AuthServerSync: Соединение активно, регистрирую для получения уведомлений");
+                    // Регистрируем соединение на сервере для получения уведомлений
+                    RegisterConnectionForNotifications(profile.username);
                 }
                 
                 callback?.Invoke(true, message);
@@ -397,12 +437,22 @@ public class AuthServerSync : MonoBehaviour
     {
         var requests = new List<FriendRequestData>();
         if (string.IsNullOrEmpty(requestsStr))
+        {
+            Debug.Log("AuthServerSync: ParseFriendRequests - строка пуста");
             return requests;
+        }
+        
+        Debug.Log($"AuthServerSync: ParseFriendRequests - парсю строку: '{requestsStr}'");
         
         string[] requestParts = requestsStr.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
+        Debug.Log($"AuthServerSync: ParseFriendRequests - найдено {requestParts.Length} частей");
+        
         foreach (string part in requestParts)
         {
+            Debug.Log($"AuthServerSync: ParseFriendRequests - обрабатываю часть: '{part}'");
             string[] fields = part.Split('|');
+            Debug.Log($"AuthServerSync: ParseFriendRequests - разделено на {fields.Length} полей");
+            
             if (fields.Length >= 2)
             {
                 DateTime createdAt = DateTime.Now;
@@ -410,6 +460,8 @@ public class AuthServerSync : MonoBehaviour
                 {
                     // Пытаемся распарсить дату в разных форматах
                     string dateStr = fields[2];
+                    Debug.Log($"AuthServerSync: ParseFriendRequests - дата: '{dateStr}'");
+                    
                     // Убираем временную зону если есть
                     if (dateStr.Contains("+"))
                     {
@@ -417,16 +469,24 @@ public class AuthServerSync : MonoBehaviour
                     }
                     if (!DateTime.TryParse(dateStr, out createdAt))
                     {
+                        Debug.LogWarning($"AuthServerSync: ParseFriendRequests - не удалось распарсить дату '{dateStr}', использую текущую");
                         createdAt = DateTime.Now;
                     }
                 }
                 
-                requests.Add(new FriendRequestData
+                var request = new FriendRequestData
                 {
                     from = fields[0],
                     to = fields[1],
                     createdAtTicks = createdAt.Ticks
-                });
+                };
+                
+                requests.Add(request);
+                Debug.Log($"AuthServerSync: ParseFriendRequests - добавлена заявка: {request.from} -> {request.to}");
+            }
+            else
+            {
+                Debug.LogWarning($"AuthServerSync: ParseFriendRequests - недостаточно полей в части '{part}'");
             }
         }
         
@@ -516,6 +576,40 @@ public class AuthServerSync : MonoBehaviour
         // Сохраняем обновленный профиль
         UserDataManager.SaveUserProfile(currentUser);
         AuthManager.NotifySocialChanged();
+    }
+    
+    private void RegisterConnectionForNotifications(string username)
+    {
+        if (authClient != null && authClient.IsConnected())
+        {
+            authClient.RegisterForNotifications(username);
+            Debug.Log($"AuthServerSync: Отправлен запрос на регистрацию для уведомлений: {username}");
+        }
+        else
+        {
+            Debug.LogWarning("AuthServerSync: Не могу зарегистрироваться для уведомлений - нет соединения");
+        }
+    }
+    
+    private System.Collections.IEnumerator WaitAndRegisterForNotifications(string username)
+    {
+        float timeout = 5f;
+        float elapsed = 0f;
+        
+        while (!authClient.IsConnected() && elapsed < timeout)
+        {
+            yield return new WaitForSeconds(0.1f);
+            elapsed += 0.1f;
+        }
+        
+        if (authClient.IsConnected())
+        {
+            RegisterConnectionForNotifications(username);
+        }
+        else
+        {
+            Debug.LogWarning("AuthServerSync: Не удалось подключиться для регистрации уведомлений");
+        }
     }
     
     public void SetServerAddress(string host, int port)
