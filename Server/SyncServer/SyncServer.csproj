@@ -8,7 +8,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PokerServer.csproj" />
+    <Compile Include="..\SimpleSyncServer.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Исключаем файлы, которые не нужны для сервера синхронизации -->
+    <Compile Remove="..\Program.cs" />
+    <Compile Remove="..\PokerServer.cs" />
+    <Compile Remove="..\ClientConnection.cs" />
+    <Compile Remove="..\GameSession.cs" />
+    <Compile Remove="..\CloudSyncService.cs" />
+    <Compile Remove="..\UserDatabase.cs" />
   </ItemGroup>
 
 </Project>
