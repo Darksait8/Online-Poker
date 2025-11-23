@@ -22,13 +22,7 @@
     "XP": 0,
     "Level": 1,
     "Friends": [],
-    "IncomingFriendRequests": [
-      {
-        "From": "artem",
-        "To": "igor",
-        "CreatedAt": "2025-11-23T23:46:53.3789699+03:00"
-      }
-    ],
+    "IncomingFriendRequests": [],
     "OutgoingFriendRequests": []
   },
   "artem": {
@@ -42,17 +36,6 @@
     "Level": 1,
     "Friends": [],
     "IncomingFriendRequests": [],
-    "OutgoingFriendRequests": [
-      {
-        "From": "artem",
-        "To": "igor",
-        "CreatedAt": "2025-11-23T23:46:53.3789699+03:00"
-      },
-      {
-        "From": "artem",
-        "To": "misha",
-        "CreatedAt": "2025-11-24T00:20:21.9866471+03:00"
-      }
-    ]
+    "OutgoingFriendRequests": []
   }
 }
