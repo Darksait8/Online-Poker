@@ -23,10 +23,10 @@ namespace PokerServer
         
         private int port;
         
-        public PokerServer(int port = 8888, bool enableCloudSync = false)
+        public PokerServer(int port = 8888)
         {
             this.port = port;
-            this.userDatabase = new UserDatabase("users.json", enableCloudSync);
+            this.userDatabase = new UserDatabase("users.json");
         }
         
         public void Start()
@@ -119,7 +119,7 @@ namespace PokerServer
             }
         }
         
-        public void BroadcastMessage(Dictionary<string, object> message, ClientConnection? excludeClient = null)
+        public void BroadcastMessage(Dictionary<string, object> message, ClientConnection excludeClient = null)
         {
             string json = SerializeMessage(message);
             byte[] data = Encoding.UTF8.GetBytes(json);
