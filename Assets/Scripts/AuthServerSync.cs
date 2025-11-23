@@ -42,6 +42,42 @@ public class AuthServerSync : MonoBehaviour
     {
         // Не подключаемся автоматически - подключение произойдет при необходимости
         // Адрес сервера будет синхронизирован через ConnectionManager
+        
+        // Если пользователь уже авторизован, подключаемся для получения уведомлений
+        if (useServerAuth && AuthManager.IsLoggedIn && AuthManager.CurrentUser != null)
+        {
+            StartCoroutine(ConnectForNotifications());
+        }
+    }
+    
+    private System.Collections.IEnumerator ConnectForNotifications()
+    {
+        // Ждем немного, чтобы все компоненты инициализировались
+        yield return new WaitForSeconds(1f);
+        
+        if (!authClient.IsConnected())
+        {
+            Debug.Log("AuthServerSync: Подключаюсь к серверу для получения уведомлений...");
+            authClient.Connect();
+            
+            // Ждем подключения
+            float timeout = 5f;
+            float elapsed = 0f;
+            while (!authClient.IsConnected() && elapsed < timeout)
+            {
+                yield return new WaitForSeconds(0.1f);
+                elapsed += 0.1f;
+            }
+            
+            if (authClient.IsConnected())
+            {
+                Debug.Log("AuthServerSync: Подключен для получения уведомлений");
+            }
+            else
+            {
+                Debug.LogWarning("AuthServerSync: Не удалось подключиться для получения уведомлений");
+            }
+        }
     }
     
     /// <summary>
@@ -235,6 +271,17 @@ public class AuthServerSync : MonoBehaviour
                 
                 AuthManager.SetCurrentUser(profile);
                 UserDataManager.SaveUserProfile(profile);
+                
+                // Убеждаемся, что соединение остается активным для получения уведомлений
+                if (!authClient.IsConnected())
+                {
+                    Debug.LogWarning("AuthServerSync: Соединение потеряно после логина, переподключаюсь...");
+                    authClient.Connect();
+                }
+                else
+                {
+                    Debug.Log("AuthServerSync: Соединение активно, готов к получению уведомлений");
+                }
                 
                 callback?.Invoke(true, message);
             }

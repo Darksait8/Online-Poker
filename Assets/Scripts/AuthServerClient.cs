@@ -430,14 +430,22 @@ public class AuthServerClient : MonoBehaviour
                     
                 case "friend_request_notification":
                     // Уведомление о новой заявке в друзья
+                    if (enableDebugLogs)
+                        Debug.Log("AuthServerClient: Получено уведомление friend_request_notification");
                     ExecuteOnMainThread(() => {
+                        if (enableDebugLogs)
+                            Debug.Log("AuthServerClient: Вызываю OnFriendRequestNotification");
                         OnFriendRequestNotification?.Invoke(messageData);
                     });
                     break;
                     
                 case "friend_data_update":
                     // Обновление данных о друзьях
+                    if (enableDebugLogs)
+                        Debug.Log("AuthServerClient: Получено обновление friend_data_update");
                     ExecuteOnMainThread(() => {
+                        if (enableDebugLogs)
+                            Debug.Log("AuthServerClient: Вызываю OnFriendDataUpdate");
                         OnFriendDataUpdate?.Invoke(messageData);
                     });
                     break;
