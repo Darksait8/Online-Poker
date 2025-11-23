@@ -24,6 +24,9 @@ public class AuthServerSync : MonoBehaviour
             authClient = gameObject.AddComponent<AuthServerClient>();
         }
         
+        // Пытаемся получить адрес сервера из ConnectionManager или PlayerPrefs
+        TryLoadServerAddress();
+        
         authClient.SetServerAddress(serverHost, serverPort);
         
         // Подписываемся на события
@@ -35,10 +38,38 @@ public class AuthServerSync : MonoBehaviour
     
     private void Start()
     {
-        if (useServerAuth)
+        // Не подключаемся автоматически - подключение произойдет при необходимости
+        // Адрес сервера будет синхронизирован через ConnectionManager
+    }
+    
+    /// <summary>
+    /// Пытается загрузить адрес сервера из ConnectionManager или PlayerPrefs
+    /// </summary>
+    private void TryLoadServerAddress()
+    {
+        // Пытаемся найти ConnectionManager и получить адрес оттуда
+        ConnectionManager connManager = FindObjectOfType<ConnectionManager>();
+        if (connManager != null)
         {
-            // Подключаемся к серверу при старте
-            authClient.Connect();
+            string host = connManager.GetServerHost();
+            int port = connManager.GetServerPort();
+            if (!string.IsNullOrEmpty(host) && host != "localhost")
+            {
+                serverHost = host;
+                serverPort = port;
+                Debug.Log($"✅ Адрес сервера авторизации загружен из ConnectionManager: {host}:{port}");
+                return;
+            }
+        }
+        
+        // Если не нашли, пытаемся загрузить из PlayerPrefs
+        string savedHost = PlayerPrefs.GetString("ServerHost", "");
+        int savedPort = PlayerPrefs.GetInt("ServerPort", 8888);
+        if (!string.IsNullOrEmpty(savedHost))
+        {
+            serverHost = savedHost;
+            serverPort = savedPort;
+            Debug.Log($"✅ Адрес сервера авторизации загружен из PlayerPrefs: {savedHost}:{savedPort}");
         }
     }
     
@@ -76,6 +107,15 @@ public class AuthServerSync : MonoBehaviour
         if (password.Length < 6)
         {
             callback?.Invoke(false, "Пароль должен содержать минимум 6 символов");
+            return;
+        }
+        
+        // Убеждаемся, что подключены к серверу
+        if (!authClient.IsConnected())
+        {
+            authClient.Connect();
+            // Ждем подключения асинхронно
+            StartCoroutine(WaitForConnectionAndRegister(username, email, password, confirmPassword, callback));
             return;
         }
         
@@ -126,6 +166,15 @@ public class AuthServerSync : MonoBehaviour
             // Используем локальную авторизацию
             AuthManager.Login(username, password);
             callback?.Invoke(true, "Вход выполнен локально");
+            return;
+        }
+        
+        // Убеждаемся, что подключены к серверу
+        if (!authClient.IsConnected())
+        {
+            authClient.Connect();
+            // Ждем подключения асинхронно
+            StartCoroutine(WaitForConnectionAndLogin(username, password, callback));
             return;
         }
         
@@ -244,6 +293,121 @@ public class AuthServerSync : MonoBehaviour
         {
             authClient.SetServerAddress(host, port);
         }
+    }
+    
+    /// <summary>
+    /// Корутина для ожидания подключения и регистрации
+    /// </summary>
+    private System.Collections.IEnumerator WaitForConnectionAndRegister(string username, string email, 
+        string password, string confirmPassword, System.Action<bool, string> callback)
+    {
+        float timeout = 5f;
+        float elapsed = 0f;
+        
+        while (!authClient.IsConnected() && elapsed < timeout)
+        {
+            yield return new WaitForSeconds(0.1f);
+            elapsed += 0.1f;
+        }
+        
+        if (!authClient.IsConnected())
+        {
+            callback?.Invoke(false, "Не удалось подключиться к серверу авторизации");
+            yield break;
+        }
+        
+        // Теперь выполняем регистрацию (но избегаем рекурсии)
+        // Вызываем внутреннюю логику регистрации напрямую
+        System.Action<bool, string, Dictionary<string, object>> registerHandler = null;
+        registerHandler = (success, message, data) =>
+        {
+            authClient.OnRegisterResponse -= registerHandler;
+            
+            if (success)
+            {
+                var profile = new UserProfile
+                {
+                    username = data.ContainsKey("username") ? data["username"].ToString() : username,
+                    email = email,
+                    passwordHash = "",
+                    registrationDate = DateTime.Now,
+                    lastLoginDate = DateTime.Now,
+                    isLoggedIn = true,
+                    chips = data.ContainsKey("chips") ? Convert.ToInt32(data["chips"]) : 1000,
+                    XP = data.ContainsKey("xp") ? Convert.ToInt32(data["xp"]) : 0
+                };
+                
+                profile.StartNewSession();
+                AuthManager.SetCurrentUser(profile);
+                UserDataManager.SaveUserProfile(profile);
+                
+                callback?.Invoke(true, message);
+            }
+            else
+            {
+                callback?.Invoke(false, message);
+            }
+        };
+        
+        authClient.OnRegisterResponse += registerHandler;
+        authClient.Register(username, email, password);
+    }
+    
+    /// <summary>
+    /// Корутина для ожидания подключения и входа
+    /// </summary>
+    private System.Collections.IEnumerator WaitForConnectionAndLogin(string username, string password, 
+        System.Action<bool, string> callback)
+    {
+        float timeout = 5f;
+        float elapsed = 0f;
+        
+        while (!authClient.IsConnected() && elapsed < timeout)
+        {
+            yield return new WaitForSeconds(0.1f);
+            elapsed += 0.1f;
+        }
+        
+        if (!authClient.IsConnected())
+        {
+            callback?.Invoke(false, "Не удалось подключиться к серверу авторизации");
+            yield break;
+        }
+        
+        // Теперь выполняем вход
+        System.Action<bool, string, Dictionary<string, object>> loginHandler = null;
+        loginHandler = (success, message, data) =>
+        {
+            authClient.OnLoginResponse -= loginHandler;
+            
+            if (success)
+            {
+                var profile = new UserProfile
+                {
+                    username = data.ContainsKey("username") ? data["username"].ToString() : username,
+                    email = data.ContainsKey("email") ? data["email"].ToString() : "",
+                    passwordHash = "",
+                    registrationDate = DateTime.Parse(data.ContainsKey("registration_date") ? data["registration_date"].ToString() : DateTime.Now.ToString()),
+                    lastLoginDate = DateTime.Now,
+                    isLoggedIn = true,
+                    chips = data.ContainsKey("chips") ? Convert.ToInt32(data["chips"]) : 1000,
+                    XP = data.ContainsKey("xp") ? Convert.ToInt32(data["xp"]) : 0
+                };
+                
+                profile.StartNewSession();
+                AuthManager.SetCurrentUser(profile);
+                UserDataManager.SaveUserProfile(profile);
+                
+                callback?.Invoke(true, message);
+            }
+            else
+            {
+                callback?.Invoke(false, message);
+            }
+        };
+        
+        authClient.OnLoginResponse += loginHandler;
+        authClient.Login(username, password);
     }
 }
 
