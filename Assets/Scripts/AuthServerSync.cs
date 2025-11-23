@@ -34,6 +34,8 @@ public class AuthServerSync : MonoBehaviour
         authClient.OnLoginResponse += HandleLoginResponse;
         authClient.OnProfileResponse += HandleProfileResponse;
         authClient.OnUpdateResponse += HandleUpdateResponse;
+        authClient.OnFriendRequestNotification += HandleFriendRequestNotification;
+        authClient.OnFriendDataUpdate += HandleFriendDataUpdate;
     }
     
     private void Start()
@@ -77,10 +79,12 @@ public class AuthServerSync : MonoBehaviour
     {
         if (authClient != null)
         {
-            authClient.OnRegisterResponse -= HandleRegisterResponse;
-            authClient.OnLoginResponse -= HandleLoginResponse;
-            authClient.OnProfileResponse -= HandleProfileResponse;
-            authClient.OnUpdateResponse -= HandleUpdateResponse;
+        authClient.OnRegisterResponse -= HandleRegisterResponse;
+        authClient.OnLoginResponse -= HandleLoginResponse;
+        authClient.OnProfileResponse -= HandleProfileResponse;
+        authClient.OnUpdateResponse -= HandleUpdateResponse;
+        authClient.OnFriendRequestNotification -= HandleFriendRequestNotification;
+        authClient.OnFriendDataUpdate -= HandleFriendDataUpdate;
         }
     }
     
@@ -200,6 +204,35 @@ public class AuthServerSync : MonoBehaviour
                 };
                 
                 profile.StartNewSession();
+                
+                // Синхронизируем заявки в друзья с сервера
+                if (data.ContainsKey("friends"))
+                {
+                    string friendsStr = data["friends"].ToString();
+                    if (!string.IsNullOrEmpty(friendsStr))
+                    {
+                        profile.friends = new List<string>(friendsStr.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+                    }
+                }
+                
+                if (data.ContainsKey("incoming_requests"))
+                {
+                    string incomingStr = data["incoming_requests"].ToString();
+                    if (!string.IsNullOrEmpty(incomingStr))
+                    {
+                        profile.incomingFriendRequests = ParseFriendRequests(incomingStr);
+                    }
+                }
+                
+                if (data.ContainsKey("outgoing_requests"))
+                {
+                    string outgoingStr = data["outgoing_requests"].ToString();
+                    if (!string.IsNullOrEmpty(outgoingStr))
+                    {
+                        profile.outgoingFriendRequests = ParseFriendRequests(outgoingStr);
+                    }
+                }
+                
                 AuthManager.SetCurrentUser(profile);
                 UserDataManager.SaveUserProfile(profile);
                 
@@ -325,16 +358,117 @@ public class AuthServerSync : MonoBehaviour
             string[] fields = part.Split('|');
             if (fields.Length >= 2)
             {
+                DateTime createdAt = DateTime.Now;
+                if (fields.Length >= 3)
+                {
+                    // Пытаемся распарсить дату в разных форматах
+                    string dateStr = fields[2];
+                    // Убираем временную зону если есть
+                    if (dateStr.Contains("+"))
+                    {
+                        dateStr = dateStr.Substring(0, dateStr.IndexOf("+"));
+                    }
+                    if (!DateTime.TryParse(dateStr, out createdAt))
+                    {
+                        createdAt = DateTime.Now;
+                    }
+                }
+                
                 requests.Add(new FriendRequestData
                 {
                     from = fields[0],
                     to = fields[1],
-                    createdAtTicks = fields.Length >= 3 ? DateTime.Parse(fields[2]).Ticks : DateTime.Now.Ticks
+                    createdAtTicks = createdAt.Ticks
                 });
             }
         }
         
+        Debug.Log($"AuthServerSync: Распарсено {requests.Count} заявок из строки: {requestsStr}");
         return requests;
+    }
+    
+    private void HandleFriendRequestNotification(Dictionary<string, object> data)
+    {
+        Debug.Log("AuthServerSync: Получено уведомление о новой заявке в друзья");
+        
+        var currentUser = AuthManager.CurrentUser;
+        if (currentUser == null)
+            return;
+        
+        // Обновляем заявки
+        if (data.ContainsKey("incoming_requests"))
+        {
+            string incomingStr = data["incoming_requests"].ToString();
+            if (!string.IsNullOrEmpty(incomingStr))
+            {
+                currentUser.incomingFriendRequests = ParseFriendRequests(incomingStr);
+            }
+        }
+        
+        if (data.ContainsKey("outgoing_requests"))
+        {
+            string outgoingStr = data["outgoing_requests"].ToString();
+            if (!string.IsNullOrEmpty(outgoingStr))
+            {
+                currentUser.outgoingFriendRequests = ParseFriendRequests(outgoingStr);
+            }
+        }
+        
+        if (data.ContainsKey("friends"))
+        {
+            string friendsStr = data["friends"].ToString();
+            if (!string.IsNullOrEmpty(friendsStr))
+            {
+                currentUser.friends = new List<string>(friendsStr.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+            }
+        }
+        
+        // Сохраняем обновленный профиль
+        UserDataManager.SaveUserProfile(currentUser);
+        AuthManager.NotifySocialChanged();
+        
+        Debug.Log($"AuthServerSync: Заявки обновлены. Входящих: {currentUser.incomingFriendRequests?.Count ?? 0}");
+    }
+    
+    private void HandleFriendDataUpdate(Dictionary<string, object> data)
+    {
+        Debug.Log("AuthServerSync: Получено обновление данных о друзьях");
+        
+        var currentUser = AuthManager.CurrentUser;
+        if (currentUser == null)
+            return;
+        
+        // Обновляем данные
+        if (data.ContainsKey("friends"))
+        {
+            string friendsStr = data["friends"].ToString();
+            if (!string.IsNullOrEmpty(friendsStr))
+            {
+                currentUser.friends = new List<string>(friendsStr.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+            }
+        }
+        
+        if (data.ContainsKey("incoming_requests"))
+        {
+            string incomingStr = data["incoming_requests"].ToString();
+            if (!string.IsNullOrEmpty(incomingStr))
+            {
+                currentUser.incomingFriendRequests = ParseFriendRequests(incomingStr);
+            }
+        }
+        
+        if (data.ContainsKey("outgoing_requests"))
+        {
+            string outgoingStr = data["outgoing_requests"].ToString();
+            if (!string.IsNullOrEmpty(outgoingStr))
+            {
+                currentUser.outgoingFriendRequests = ParseFriendRequests(outgoingStr);
+            }
+        }
+        
+        // Сохраняем обновленный профиль
+        UserDataManager.SaveUserProfile(currentUser);
+        AuthManager.NotifySocialChanged();
     }
     
     public void SetServerAddress(string host, int port)

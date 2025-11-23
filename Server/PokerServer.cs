@@ -16,9 +16,11 @@ namespace PokerServer
     {
         private TcpListener listener;
         private List<ClientConnection> clients = new List<ClientConnection>();
+        private Dictionary<string, ClientConnection> authenticatedUsers = new Dictionary<string, ClientConnection>(); // username -> client
         private GameSession currentSession;
         private bool isRunning = false;
         private readonly object clientsLock = new object();
+        private readonly object authenticatedUsersLock = new object();
         private UserDatabase userDatabase;
         
         private int port;
@@ -212,12 +214,23 @@ namespace PokerServer
             
             if (result.Success && result.User != null)
             {
+                // Инициализируем списки, если они null
+                if (result.User.Friends == null) result.User.Friends = new List<string>();
+                if (result.User.IncomingFriendRequests == null) result.User.IncomingFriendRequests = new List<UserDatabase.FriendRequest>();
+                if (result.User.OutgoingFriendRequests == null) result.User.OutgoingFriendRequests = new List<UserDatabase.FriendRequest>();
+                
                 response["username"] = result.User.Username;
                 response["email"] = result.User.Email;
                 response["chips"] = result.User.Chips;
                 response["xp"] = result.User.XP;
                 response["level"] = result.User.Level;
                 response["registration_date"] = result.User.RegistrationDate.ToString("yyyy-MM-dd HH:mm:ss");
+                response["friends"] = string.Join(",", result.User.Friends);
+                response["incoming_requests"] = SerializeFriendRequests(result.User.IncomingFriendRequests);
+                response["outgoing_requests"] = SerializeFriendRequests(result.User.OutgoingFriendRequests);
+                
+                // Регистрируем пользователя для получения уведомлений
+                RegisterAuthenticatedUser(result.User.Username, client);
             }
             
             client.SendMessage(response);
@@ -358,9 +371,16 @@ namespace PokerServer
             };
             
             if (success)
+            {
                 Console.WriteLine($"✅ Заявка в друзья отправлена: {fromUsername} -> {toUsername}");
+                
+                // Отправляем уведомление получателю в реальном времени, если он подключен
+                SendFriendRequestNotification(toUsername, fromUsername);
+            }
             else
+            {
                 Console.WriteLine($"❌ Ошибка отправки заявки: {error}");
+            }
             
             client.SendMessage(response);
         }
@@ -380,11 +400,54 @@ namespace PokerServer
             };
             
             if (success)
+            {
                 Console.WriteLine($"✅ Заявка в друзья принята: {username} принял заявку от {requesterUsername}");
+                
+                // Уведомляем обоих пользователей об обновлении
+                SendFriendDataUpdate(username);
+                SendFriendDataUpdate(requesterUsername);
+            }
             else
+            {
                 Console.WriteLine($"❌ Ошибка принятия заявки: {error}");
+            }
             
             client.SendMessage(response);
+        }
+        
+        /// <summary>
+        /// Отправляет обновление данных о друзьях пользователю
+        /// </summary>
+        private void SendFriendDataUpdate(string username)
+        {
+            lock (authenticatedUsersLock)
+            {
+                if (authenticatedUsers.ContainsKey(username.ToLower()))
+                {
+                    var userClient = authenticatedUsers[username.ToLower()];
+                    if (userClient != null && userClient.IsConnected)
+                    {
+                        var user = userDatabase.GetUser(username);
+                        if (user != null)
+                        {
+                            // Инициализируем списки, если они null
+                            if (user.Friends == null) user.Friends = new List<string>();
+                            if (user.IncomingFriendRequests == null) user.IncomingFriendRequests = new List<UserDatabase.FriendRequest>();
+                            if (user.OutgoingFriendRequests == null) user.OutgoingFriendRequests = new List<UserDatabase.FriendRequest>();
+                            
+                            var update = new Dictionary<string, object>
+                            {
+                                {"type", "friend_data_update"},
+                                {"friends", string.Join(",", user.Friends)},
+                                {"incoming_requests", SerializeFriendRequests(user.IncomingFriendRequests)},
+                                {"outgoing_requests", SerializeFriendRequests(user.OutgoingFriendRequests)}
+                            };
+                            
+                            userClient.SendMessage(update);
+                        }
+                    }
+                }
+            }
         }
         
         public void HandleFriendDeclineRequest(ClientConnection client, Dictionary<string, object> data)
@@ -477,7 +540,8 @@ namespace PokerServer
             if (requests == null || requests.Count == 0)
                 return "";
             
-            var requestStrings = requests.Select(r => $"{r.From}|{r.To}|{r.CreatedAt:yyyy-MM-dd HH:mm:ss}").ToList();
+            // Используем ISO формат для совместимости
+            var requestStrings = requests.Select(r => $"{r.From}|{r.To}|{r.CreatedAt:yyyy-MM-ddTHH:mm:ss}").ToList();
             return string.Join("|||", requestStrings);
         }
         

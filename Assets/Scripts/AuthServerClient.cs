@@ -33,6 +33,8 @@ public class AuthServerClient : MonoBehaviour
     public System.Action<bool, Dictionary<string, object>> OnProfileResponse;
     public System.Action<bool, string> OnUpdateResponse;
     public System.Action<bool, List<Dictionary<string, object>>> OnAllUsersResponse;
+    public System.Action<Dictionary<string, object>> OnFriendRequestNotification;
+    public System.Action<Dictionary<string, object>> OnFriendDataUpdate;
     
     private void Update()
     {
@@ -423,6 +425,20 @@ public class AuthServerClient : MonoBehaviour
                     // Выполняем в главном потоке
                     ExecuteOnMainThread(() => {
                         OnUpdateResponse?.Invoke(updateSuccess, updateMessage);
+                    });
+                    break;
+                    
+                case "friend_request_notification":
+                    // Уведомление о новой заявке в друзья
+                    ExecuteOnMainThread(() => {
+                        OnFriendRequestNotification?.Invoke(messageData);
+                    });
+                    break;
+                    
+                case "friend_data_update":
+                    // Обновление данных о друзьях
+                    ExecuteOnMainThread(() => {
+                        OnFriendDataUpdate?.Invoke(messageData);
                     });
                     break;
                     
