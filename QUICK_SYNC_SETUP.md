@@ -5,11 +5,17 @@
 ### 1. Запустите сервер синхронизации на одном ПК
 
 ```bash
-cd Server
-dotnet run --sync-server --port 8889 --key "мой-секретный-ключ"
+cd Server/SyncServer
+dotnet run --port 8889 --key "мой-секретный-ключ"
 ```
 
-Или создайте отдельный проект для сервера синхронизации (см. `Server/SyncServer/Program.cs`)
+Или с переменными окружения:
+```bash
+cd Server/SyncServer
+export SYNC_PORT=8889
+export SYNC_API_KEY="мой-секретный-ключ"
+dotnet run
+```
 
 ### 2. Узнайте IP-адрес этого ПК
 
