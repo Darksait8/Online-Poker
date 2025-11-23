@@ -661,15 +661,25 @@ public class AuthServerSync : MonoBehaviour
     
     private void RegisterConnectionForNotifications(string username)
     {
-        if (authClient != null && authClient.IsConnected())
+        if (authClient == null)
         {
-            authClient.RegisterForNotifications(username);
-            Debug.Log($"AuthServerSync: Отправлен запрос на регистрацию для уведомлений: {username}");
+            Debug.LogError("AuthServerSync: authClient == null, не могу зарегистрироваться для уведомлений");
+            return;
         }
-        else
+        
+        if (!authClient.IsConnected())
         {
-            Debug.LogWarning("AuthServerSync: Не могу зарегистрироваться для уведомлений - нет соединения");
+            Debug.LogWarning($"AuthServerSync: authClient не подключен для {username}, пытаюсь подключиться...");
+            authClient.Connect();
+            
+            // Ждем подключения и регистрируемся
+            StartCoroutine(WaitAndRegisterForNotifications(username));
+            return;
         }
+        
+        Debug.Log($"AuthServerSync: Отправляю запрос на регистрацию для уведомлений: {username} (соединение активно)");
+        authClient.RegisterForNotifications(username);
+        Debug.Log($"AuthServerSync: Запрос на регистрацию отправлен для {username}");
     }
     
     private System.Collections.IEnumerator WaitAndRegisterForNotifications(string username)

@@ -252,9 +252,18 @@ namespace PokerServer
                 Console.WriteLine($"   - Друзья: {result.User.Friends.Count}");
                 Console.WriteLine($"   - Входящие заявки: {result.User.IncomingFriendRequests.Count} ({incomingRequestsStr})");
                 Console.WriteLine($"   - Исходящие заявки: {result.User.OutgoingFriendRequests.Count} ({outgoingRequestsStr})");
+                Console.WriteLine($"   - Соединение клиента: IsConnected={client?.IsConnected}");
                 
                 // Регистрируем пользователя для получения уведомлений
-                RegisterAuthenticatedUser(result.User.Username, client);
+                if (client != null && client.IsConnected)
+                {
+                    RegisterAuthenticatedUser(result.User.Username, client);
+                    Console.WriteLine($"✅ Пользователь {result.User.Username} зарегистрирован при логине");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ Не могу зарегистрировать {result.User.Username} - соединение не активно");
+                }
             }
             
             client.SendMessage(response);
@@ -449,8 +458,21 @@ namespace PokerServer
         {
             lock (authenticatedUsersLock)
             {
+                if (client == null)
+                {
+                    Console.WriteLine($"❌ Попытка зарегистрировать пользователя {username} с null соединением");
+                    return;
+                }
+                
                 authenticatedUsers[username.ToLower()] = client;
-                Console.WriteLine($"👤 Зарегистрирован авторизованный пользователь: {username}");
+                Console.WriteLine($"👤 Зарегистрирован авторизованный пользователь: {username} (всего авторизованных: {authenticatedUsers.Count})");
+                
+                // Выводим список всех авторизованных пользователей для отладки
+                Console.WriteLine($"   Список авторизованных пользователей:");
+                foreach (var kvp in authenticatedUsers)
+                {
+                    Console.WriteLine($"     - {kvp.Key}: подключен={kvp.Value?.IsConnected}");
+                }
             }
         }
         
@@ -651,8 +673,15 @@ namespace PokerServer
                 return;
             }
             
+            if (client == null)
+            {
+                Console.WriteLine($"❌ Попытка зарегистрировать {username} для уведомлений с null соединением");
+                return;
+            }
+            
+            Console.WriteLine($"📬 Получен запрос на регистрацию для уведомлений от {username}, соединение: {client.IsConnected}");
             RegisterAuthenticatedUser(username, client);
-            Console.WriteLine($"📬 Пользователь {username} зарегистрирован для получения уведомлений");
+            Console.WriteLine($"✅ Пользователь {username} зарегистрирован для получения уведомлений");
         }
         
         private string SerializeFriendRequests(List<UserDatabase.FriendRequest> requests)
