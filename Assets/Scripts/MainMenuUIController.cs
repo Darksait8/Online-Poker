@@ -1437,22 +1437,30 @@ public class MainMenuUIController : MonoBehaviour
 
     private void BuildLeaderboardSections(out List<LeaderboardEntry> topBalance, out List<LeaderboardEntry> topLevel)
     {
+        // Инициализируем пустые списки
         topBalance = new List<LeaderboardEntry>();
         topLevel = new List<LeaderboardEntry>();
         
         // Пытаемся загрузить данные со сервера
         AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
-        var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        bool useServerAuth = authSync != null && useServerAuthField != null && 
-                            (bool)(useServerAuthField.GetValue(authSync) ?? false);
-        
-        if (authSync != null && useServerAuth)
+        if (authSync != null)
         {
-            // Загружаем данные со сервера асинхронно
-            LoadLeaderboardFromServer(authSync);
-            return;
+            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            bool useServerAuth = useServerAuthField != null && 
+                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
+            
+            if (useServerAuth)
+            {
+                Debug.Log("MainMenuUIController: Используется серверная авторизация, загружаю данные со сервера...");
+                // Загружаем данные со сервера асинхронно
+                // Возвращаем пустые списки, они обновятся когда данные загрузятся
+                LoadLeaderboardFromServer(authSync);
+                return;
+            }
         }
+        
+        Debug.Log("MainMenuUIController: Используются локальные данные (серверная авторизация не включена)");
         
         // Fallback на локальные данные
         var profiles = AuthManager.GetAllProfilesSnapshot() ?? new List<UserProfile>();
@@ -1699,20 +1707,37 @@ public class MainMenuUIController : MonoBehaviour
         
         // Пытаемся загрузить данные со сервера
         AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
-        var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        bool useServerAuth = authSync != null && useServerAuthField != null && 
-                            (bool)(useServerAuthField.GetValue(authSync) ?? false);
+        Debug.Log($"MainMenuUIController: AuthServerSync найден: {authSync != null}");
         
-        if (authSync != null && useServerAuth)
+        if (authSync != null)
         {
-            // Загружаем данные со сервера (панель обновится автоматически)
-            LoadLeaderboardFromServer(authSync);
-            // Показываем пустую панель, она обновится когда данные загрузятся
-            leaderboardPanel.Show(new List<LeaderboardEntry>(), new List<LeaderboardEntry>());
+            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            bool useServerAuth = useServerAuthField != null && 
+                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
+            
+            Debug.Log($"MainMenuUIController: useServerAuth = {useServerAuth}");
+            
+            if (useServerAuth)
+            {
+                Debug.Log("MainMenuUIController: Серверная авторизация включена, загружаю данные со сервера...");
+                // Загружаем данные со сервера (панель обновится автоматически)
+                LoadLeaderboardFromServer(authSync);
+                // Показываем пустую панель, она обновится когда данные загрузятся
+                leaderboardPanel.Show(new List<LeaderboardEntry>(), new List<LeaderboardEntry>());
+            }
+            else
+            {
+                Debug.Log("MainMenuUIController: Серверная авторизация выключена, используем локальные данные");
+                // Используем локальные данные
+                BuildLeaderboardSections(out var topBalance, out var topLevel);
+                Debug.Log($"MainMenuUIController: Построены секции. По балансу: {topBalance?.Count ?? 0}, По уровню: {topLevel?.Count ?? 0}");
+                leaderboardPanel.Show(topBalance, topLevel);
+            }
         }
         else
         {
+            Debug.LogWarning("MainMenuUIController: AuthServerSync не найден, используем локальные данные");
             // Используем локальные данные
             BuildLeaderboardSections(out var topBalance, out var topLevel);
             Debug.Log($"MainMenuUIController: Построены секции. По балансу: {topBalance?.Count ?? 0}, По уровню: {topLevel?.Count ?? 0}");
