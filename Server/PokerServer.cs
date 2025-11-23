@@ -57,12 +57,27 @@ namespace PokerServer
             isRunning = false;
             listener?.Stop();
             
+            // Создаем копию списка, чтобы избежать ошибки модификации во время перечисления
+            List<ClientConnection> clientsCopy;
             lock (clientsLock)
             {
-                foreach (var client in clients)
+                clientsCopy = new List<ClientConnection>(clients);
+            }
+            
+            foreach (var client in clientsCopy)
+            {
+                try
                 {
                     client.Close();
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Ошибка при закрытии клиента: {ex.Message}");
+                }
+            }
+            
+            lock (clientsLock)
+            {
                 clients.Clear();
             }
             
@@ -130,6 +145,19 @@ namespace PokerServer
         
         public void HandleAuthRegister(ClientConnection client, Dictionary<string, object> data)
         {
+            if (userDatabase == null)
+            {
+                Console.WriteLine("❌ UserDatabase не инициализирована!");
+                var errorResponse = new Dictionary<string, object>
+                {
+                    {"type", "auth_register_response"},
+                    {"success", false},
+                    {"message", "Ошибка сервера: база данных не инициализирована"}
+                };
+                client.SendMessage(errorResponse);
+                return;
+            }
+            
             string username = data.ContainsKey("username") ? data["username"].ToString() : "";
             string email = data.ContainsKey("email") ? data["email"].ToString() : "";
             string password = data.ContainsKey("password") ? data["password"].ToString() : "";
@@ -156,9 +184,23 @@ namespace PokerServer
         
         public void HandleAuthLogin(ClientConnection client, Dictionary<string, object> data)
         {
+            if (userDatabase == null)
+            {
+                Console.WriteLine("❌ UserDatabase не инициализирована!");
+                var errorResponse = new Dictionary<string, object>
+                {
+                    {"type", "auth_login_response"},
+                    {"success", false},
+                    {"message", "Ошибка сервера: база данных не инициализирована"}
+                };
+                client.SendMessage(errorResponse);
+                return;
+            }
+            
             string username = data.ContainsKey("username") ? data["username"].ToString() : "";
             string password = data.ContainsKey("password") ? data["password"].ToString() : "";
             
+            Console.WriteLine($"🔐 Попытка входа: {username}");
             var result = userDatabase.Login(username, password);
             
             var response = new Dictionary<string, object>
