@@ -23,15 +23,52 @@ public class AuthServerClient : MonoBehaviour
     private Thread receiveThread;
     private bool isConnected = false;
     
+    // Очередь действий для выполнения в главном потоке
+    private Queue<System.Action> mainThreadQueue = new Queue<System.Action>();
+    private readonly object queueLock = new object();
+    
     // События
     public System.Action<bool, string, Dictionary<string, object>> OnRegisterResponse;
     public System.Action<bool, string, Dictionary<string, object>> OnLoginResponse;
     public System.Action<bool, Dictionary<string, object>> OnProfileResponse;
     public System.Action<bool, string> OnUpdateResponse;
     
+    private void Update()
+    {
+        // Выполняем действия из очереди в главном потоке
+        lock (queueLock)
+        {
+            while (mainThreadQueue.Count > 0)
+            {
+                var action = mainThreadQueue.Dequeue();
+                try
+                {
+                    action?.Invoke();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"❌ Ошибка выполнения действия в главном потоке: {e.Message}");
+                }
+            }
+        }
+    }
+    
     private void OnDestroy()
     {
         Disconnect();
+    }
+    
+    /// <summary>
+    /// Добавляет действие в очередь для выполнения в главном потоке
+    /// </summary>
+    private void ExecuteOnMainThread(System.Action action)
+    {
+        if (action == null) return;
+        
+        lock (queueLock)
+        {
+            mainThreadQueue.Enqueue(action);
+        }
     }
     
     /// <summary>
@@ -233,29 +270,44 @@ public class AuthServerClient : MonoBehaviour
             if (enableDebugLogs)
                 Debug.Log($"📨 Получено сообщение от сервера авторизации: {messageType}");
             
+            // Сохраняем данные для передачи в главный поток
+            Dictionary<string, object> messageData = new Dictionary<string, object>(data);
+            
             switch (messageType)
             {
                 case "auth_register_response":
                     bool regSuccess = data.ContainsKey("success") && Convert.ToBoolean(data["success"]);
                     string regMessage = data.ContainsKey("message") ? data["message"].ToString() : "";
-                    OnRegisterResponse?.Invoke(regSuccess, regMessage, data);
+                    // Выполняем в главном потоке
+                    ExecuteOnMainThread(() => {
+                        OnRegisterResponse?.Invoke(regSuccess, regMessage, messageData);
+                    });
                     break;
                     
                 case "auth_login_response":
                     bool loginSuccess = data.ContainsKey("success") && Convert.ToBoolean(data["success"]);
                     string loginMessage = data.ContainsKey("message") ? data["message"].ToString() : "";
-                    OnLoginResponse?.Invoke(loginSuccess, loginMessage, data);
+                    // Выполняем в главном потоке
+                    ExecuteOnMainThread(() => {
+                        OnLoginResponse?.Invoke(loginSuccess, loginMessage, messageData);
+                    });
                     break;
                     
                 case "auth_profile_response":
                     bool profileSuccess = data.ContainsKey("success") && Convert.ToBoolean(data["success"]);
-                    OnProfileResponse?.Invoke(profileSuccess, data);
+                    // Выполняем в главном потоке
+                    ExecuteOnMainThread(() => {
+                        OnProfileResponse?.Invoke(profileSuccess, messageData);
+                    });
                     break;
                     
                 case "auth_update_response":
                     bool updateSuccess = data.ContainsKey("success") && Convert.ToBoolean(data["success"]);
                     string updateMessage = data.ContainsKey("message") ? data["message"].ToString() : "";
-                    OnUpdateResponse?.Invoke(updateSuccess, updateMessage);
+                    // Выполняем в главном потоке
+                    ExecuteOnMainThread(() => {
+                        OnUpdateResponse?.Invoke(updateSuccess, updateMessage);
+                    });
                     break;
             }
         }
