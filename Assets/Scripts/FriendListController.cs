@@ -156,14 +156,45 @@ public class FriendListController : MonoBehaviour
             waitElapsed += 0.1f;
         }
         
-        if (!userExists)
+        if (!userExists || userData == null)
         {
             SetStatus("Пользователь не найден");
             yield break;
         }
         
-        // Пользователь найден на сервере, добавляем в друзья
-        if (AuthManager.TrySendFriendRequest(username, out string error))
+        // Получаем правильное имя пользователя из ответа сервера
+        string resolvedUsername = userData.ContainsKey("username") ? userData["username"].ToString() : username;
+        
+        // Сохраняем профиль пользователя локально, чтобы TrySendFriendRequest мог его найти
+        UserProfile serverProfile = new UserProfile
+        {
+            username = resolvedUsername,
+            email = userData.ContainsKey("email") ? userData["email"].ToString() : "",
+            passwordHash = "",
+            registrationDate = DateTime.Parse(userData.ContainsKey("registration_date") ? userData["registration_date"].ToString() : DateTime.Now.ToString()),
+            lastLoginDate = DateTime.Now,
+            isLoggedIn = false,
+            chips = userData.ContainsKey("chips") ? Convert.ToInt32(userData["chips"]) : 1000,
+            XP = userData.ContainsKey("xp") ? Convert.ToInt32(userData["xp"]) : 0
+        };
+        
+        // Инициализируем коллекции друзей
+        if (serverProfile.friends == null)
+            serverProfile.friends = new List<string>();
+        if (serverProfile.incomingFriendRequests == null)
+            serverProfile.incomingFriendRequests = new List<FriendRequestData>();
+        if (serverProfile.outgoingFriendRequests == null)
+            serverProfile.outgoingFriendRequests = new List<FriendRequestData>();
+        
+        // Сохраняем профиль локально
+        bool saved = UserDataManager.SaveUserProfile(serverProfile);
+        Debug.Log($"FriendListController: Профиль пользователя {resolvedUsername} сохранен локально: {saved}");
+        
+        // Даем время на сохранение
+        yield return new WaitForSeconds(0.1f);
+        
+        // Пользователь найден на сервере, добавляем в друзья (используем правильное имя)
+        if (AuthManager.TrySendFriendRequest(resolvedUsername, out string error))
         {
             SetStatus("Заявка отправлена");
             if (addFriendInput != null)
@@ -171,6 +202,7 @@ public class FriendListController : MonoBehaviour
         }
         else
         {
+            Debug.LogWarning($"FriendListController: Не удалось отправить заявку: {error}");
             SetStatus(error);
         }
     }
