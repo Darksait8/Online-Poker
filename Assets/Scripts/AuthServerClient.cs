@@ -241,6 +241,14 @@ public class AuthServerClient : MonoBehaviour
         if (level.HasValue)
             message["level"] = level.Value;
         
+        if (enableDebugLogs)
+        {
+            string chipsInfo = chips.HasValue ? chips.Value.ToString() : "null";
+            string xpInfo = xp.HasValue ? xp.Value.ToString() : "null";
+            string levelInfo = level.HasValue ? level.Value.ToString() : "null";
+            Debug.Log($"AuthServerClient: Отправляю auth_update_profile для {username} (chips={chipsInfo}, xp={xpInfo}, level={levelInfo})");
+        }
+        
         SendMessage(message);
     }
     

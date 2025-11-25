@@ -9,6 +9,36 @@ using UnityEngine;
 /// </summary>
 public class AuthServerSync : MonoBehaviour
 {
+    private static AuthServerSync instance;
+    
+    /// <summary>
+    /// Текущий экземпляр синхронизации (если отсутствует в сцене, выполняется поиск)
+    /// </summary>
+    public static AuthServerSync Instance
+    {
+        get
+        {
+            if (instance == null)
+            {
+                instance = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
+            }
+            return instance;
+        }
+    }
+    
+    /// <summary>
+    /// Гарантирует, что объект AuthServerSync существует в сцене.
+    /// При отсутствии создаёт новый GameObject и возвращает ссылку на компонент.
+    /// </summary>
+    public static AuthServerSync EnsureInstance()
+    {
+        if (Instance != null)
+            return Instance;
+        
+        var autoObject = new GameObject("AuthServerSync_AutoCreated");
+        return autoObject.AddComponent<AuthServerSync>();
+    }
+    
     [Header("Настройки")]
     [SerializeField] private bool useServerAuth = true; // Использовать серверную авторизацию
     [SerializeField] private string serverHost = "localhost";
@@ -17,8 +47,20 @@ public class AuthServerSync : MonoBehaviour
     [Header("Ссылки")]
     [SerializeField] private AuthServerClient authClient;
     
+    public bool UseServerAuth => useServerAuth;
+    public AuthServerClient Client => authClient;
+    
     private void Awake()
     {
+        if (instance != null && instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        
+        instance = this;
+        DontDestroyOnLoad(gameObject);
+        
         if (authClient == null)
         {
             authClient = gameObject.AddComponent<AuthServerClient>();
@@ -36,6 +78,24 @@ public class AuthServerSync : MonoBehaviour
         authClient.OnUpdateResponse += HandleUpdateResponse;
         authClient.OnFriendRequestNotification += HandleFriendRequestNotification;
         authClient.OnFriendDataUpdate += HandleFriendDataUpdate;
+    }
+    
+    private void OnDestroy()
+    {
+        if (instance == this)
+        {
+            instance = null;
+        }
+        
+        if (authClient != null)
+        {
+            authClient.OnRegisterResponse -= HandleRegisterResponse;
+            authClient.OnLoginResponse -= HandleLoginResponse;
+            authClient.OnProfileResponse -= HandleProfileResponse;
+            authClient.OnUpdateResponse -= HandleUpdateResponse;
+            authClient.OnFriendRequestNotification -= HandleFriendRequestNotification;
+            authClient.OnFriendDataUpdate -= HandleFriendDataUpdate;
+        }
     }
     
     private void Start()
@@ -119,19 +179,6 @@ public class AuthServerSync : MonoBehaviour
             serverHost = savedHost;
             serverPort = savedPort;
             Debug.Log($"✅ Адрес сервера авторизации загружен из PlayerPrefs: {savedHost}:{savedPort}");
-        }
-    }
-    
-    private void OnDestroy()
-    {
-        if (authClient != null)
-        {
-        authClient.OnRegisterResponse -= HandleRegisterResponse;
-        authClient.OnLoginResponse -= HandleLoginResponse;
-        authClient.OnProfileResponse -= HandleProfileResponse;
-        authClient.OnUpdateResponse -= HandleUpdateResponse;
-        authClient.OnFriendRequestNotification -= HandleFriendRequestNotification;
-        authClient.OnFriendDataUpdate -= HandleFriendDataUpdate;
         }
     }
     
@@ -409,6 +456,22 @@ public class AuthServerSync : MonoBehaviour
     {
         if (!useServerAuth || profile == null)
             return;
+        
+        if (authClient == null)
+        {
+            authClient = GetComponent<AuthServerClient>() ?? gameObject.AddComponent<AuthServerClient>();
+        }
+        
+        if (authClient == null)
+        {
+            Debug.LogWarning("AuthServerSync: Не удалось получить AuthServerClient для синхронизации профиля");
+            return;
+        }
+        
+        if (!authClient.IsConnected())
+        {
+            authClient.Connect();
+        }
         
         authClient.UpdateProfile(profile.username, profile.chips, profile.XP, profile.Level);
     }

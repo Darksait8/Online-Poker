@@ -295,19 +295,11 @@ public static class AuthManager
             Debug.Log($"AuthManager: Баланс обновлен {oldBalance} -> {newBalance}");
             
             // Синхронизируем с сервером, если используется серверная авторизация
-            AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
-            if (authSync != null)
+            AuthServerSync authSync = AuthServerSync.EnsureInstance();
+            if (authSync != null && authSync.UseServerAuth)
             {
-                var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                bool useServerAuth = useServerAuthField != null && 
-                                    (bool)(useServerAuthField.GetValue(authSync) ?? false);
-                
-                if (useServerAuth)
-                {
-                    Debug.Log($"AuthManager: Синхронизирую баланс {newBalance} с сервером...");
-                    authSync.SyncProfileToServer(_currentUser);
-                }
+                Debug.Log($"AuthManager: Синхронизирую баланс {newBalance} с сервером...");
+                authSync.SyncProfileToServer(_currentUser);
             }
             
             OnUserProfileChanged?.Invoke(_currentUser);
@@ -531,26 +523,16 @@ public static class AuthManager
         }
 
         // Отправляем заявку на сервер, если включена серверная авторизация
-        AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
-        if (authSync != null)
+        AuthServerSync authSync = AuthServerSync.Instance;
+        if (authSync != null && authSync.UseServerAuth)
         {
-            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            bool useServerAuth = useServerAuthField != null && 
-                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
+            var authClient = authSync.Client;
             
-            if (useServerAuth)
+            if (authClient != null && authClient.IsConnected())
             {
-                var authClientField = typeof(AuthServerSync).GetField("authClient", 
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
-                
-                if (authClient != null && authClient.IsConnected())
-                {
-                    // Отправляем заявку на сервер
-                    authClient.SendFriendRequest(_currentUser.username, resolvedUsername);
-                    // Заявка будет сохранена на сервере, локально тоже сохраняем для совместимости
-                }
+                // Отправляем заявку на сервер
+                authClient.SendFriendRequest(_currentUser.username, resolvedUsername);
+                // Заявка будет сохранена на сервере, локально тоже сохраняем для совместимости
             }
         }
         
@@ -763,21 +745,11 @@ public static class AuthManager
     /// </summary>
     private static string CheckUserExistsOnServer(string targetUsername)
     {
-        AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
-        if (authSync == null)
+        AuthServerSync authSync = AuthServerSync.Instance;
+        if (authSync == null || !authSync.UseServerAuth)
             return null;
         
-        var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        bool useServerAuth = useServerAuthField != null && 
-                            (bool)(useServerAuthField.GetValue(authSync) ?? false);
-        
-        if (!useServerAuth)
-            return null;
-        
-        var authClientField = typeof(AuthServerSync).GetField("authClient", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
+        var authClient = authSync.Client;
         
         if (authClient == null || !authClient.IsConnected())
             return null;
@@ -791,14 +763,11 @@ public static class AuthManager
     /// </summary>
     private static UserProfile LoadUserProfileFromServer(string username)
     {
-        AuthServerSync authSync = UnityEngine.Object.FindObjectOfType<AuthServerSync>();
-        if (authSync == null)
+        AuthServerSync authSync = AuthServerSync.Instance;
+        if (authSync == null || !authSync.UseServerAuth)
             return null;
         
-        var authClientField = typeof(AuthServerSync).GetField("authClient", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
-        
+        var authClient = authSync.Client;
         if (authClient == null || !authClient.IsConnected())
             return null;
         

@@ -68,20 +68,12 @@ public class FriendListController : MonoBehaviour
         }
         
         // Пытаемся добавить друга через сервер, если включена серверная авторизация
-        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
-        if (authSync != null)
+        AuthServerSync authSync = AuthServerSync.Instance;
+        if (authSync != null && authSync.UseServerAuth)
         {
-            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            bool useServerAuth = useServerAuthField != null && 
-                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
-            
-            if (useServerAuth)
-            {
-                // Проверяем пользователя на сервере асинхронно
-                StartCoroutine(CheckUserAndAddFriend(candidate, authSync));
-                return;
-            }
+            // Проверяем пользователя на сервере асинхронно
+            StartCoroutine(CheckUserAndAddFriend(candidate, authSync));
+            return;
         }
         
         // Fallback на локальную проверку
@@ -101,9 +93,7 @@ public class FriendListController : MonoBehaviour
     {
         SetStatus("Проверка пользователя...");
         
-        var authClientField = typeof(AuthServerSync).GetField("authClient", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
+        var authClient = authSync?.Client ?? authSync?.GetComponent<AuthServerClient>();
         
         if (authClient == null)
         {

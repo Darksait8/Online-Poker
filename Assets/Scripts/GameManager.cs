@@ -125,6 +125,7 @@ public class GameManager : MonoBehaviour
 
     private void OnDisable()
     {
+        SyncHumanBalance("OnDisable");
         AuthManager.OnUserProfileChanged -= HandleUserProfileChanged;
         handCancellation?.Cancel();
         handCancellation = null;
@@ -1254,6 +1255,7 @@ public class GameManager : MonoBehaviour
         matchFinished = false;
         gameOverPanel?.HideImmediate();
         handCancellation?.Cancel();
+        SyncHumanBalance("MainMenuRequested");
         if (SceneTransitionManager.Instance != null)
         {
             SceneTransitionManager.Instance.LoadMainMenu();
@@ -1264,6 +1266,50 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    private PlayerSeatView GetHumanSeatView()
+    {
+        if (runtimePlayers == null || runtimePlayers.Count == 0)
+            return null;
+        
+        int seat = Mathf.Clamp(humanSeatIndex, 0, runtimePlayers.Count - 1);
+        return runtimePlayers[seat];
+    }
+    
+    private bool IsHumanPlayer(WonderPokerCore.Player playerCore)
+    {
+        if (playerCore == null)
+            return false;
+        
+        if (!enableBots)
+            return true;
+        
+        if (playerCore is HumanPlayer)
+            return true;
+        
+        return seatIndexByPlayer.TryGetValue(playerCore, out int seatIdx) && seatIdx == humanSeatIndex;
+    }
+    
+    private void SyncHumanBalance(string reason)
+    {
+        var currentUser = AuthManager.CurrentUser;
+        if (currentUser == null)
+            return;
+        
+        PlayerSeatView humanSeat = GetHumanSeatView();
+        if (humanSeat == null)
+            return;
+        
+        int currentStack = humanSeat.core != null
+            ? humanSeat.core.TokensCount
+            : humanSeat.legacy?.Stack ?? currentUser.chips;
+        
+        if (currentStack != currentUser.chips)
+        {
+            Debug.Log($"GameManager: Синхронизирую баланс игрока ({reason}) {currentUser.chips} -> {currentStack}");
+            AuthManager.UpdatePlayerBalance(currentStack);
+        }
+    }
+    
     private void ShowGameOverPanel(PlayerSeatView winner)
     {
         if (matchFinished)
@@ -1281,16 +1327,21 @@ public class GameManager : MonoBehaviour
 
         // Сохраняем финальный баланс для реального игрока
         UserProfile currentUser = AuthManager.CurrentUser;
-        if (currentUser != null && winner != null)
+        bool winnerIsHuman = winner != null && IsHumanPlayer(winner.core);
+        PlayerSeatView humanSeatView = GetHumanSeatView();
+        
+        if (currentUser != null && humanSeatView != null)
         {
-            bool isHuman = winner.core is HumanPlayer || 
-                          (!enableBots || (seatIndexByPlayer.TryGetValue(winner.core, out int seatIdx) && seatIdx == humanSeatIndex));
+            int finalBalance = humanSeatView.core != null
+                ? humanSeatView.core.TokensCount
+                : humanSeatView.legacy?.Stack ?? 0;
             
-            if (isHuman)
+            // Если победитель — человек, баланс уже обновлялся ранее в HandleWinnersDetermined
+            // Поэтому сохраняем его только если игрок проиграл (или победитель не определен)
+            if (!winnerIsHuman)
             {
-                int finalBalance = winner.core.TokensCount;
                 AuthManager.UpdatePlayerBalance(finalBalance);
-                Debug.Log($"GameManager: Сохранен финальный баланс {finalBalance} фишек для игрока {currentUser.username}");
+                Debug.Log($"GameManager: Сохранен финальный баланс {finalBalance} фишек (игрок {currentUser.username} проиграл)");
             }
         }
 

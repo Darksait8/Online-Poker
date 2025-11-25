@@ -250,29 +250,15 @@ public class MainMenuUIController : MonoBehaviour
         if (leaderboardPanel == null || !leaderboardPanel.gameObject.activeSelf)
             return;
         
-        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
-        if (authSync != null)
+        AuthServerSync authSync = AuthServerSync.Instance;
+        if (authSync != null && authSync.UseServerAuth)
         {
-            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            bool useServerAuth = useServerAuthField != null && 
-                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
-            
-            if (useServerAuth)
-            {
-                Debug.Log("MainMenuUIController: Обновляю таблицу лидеров с сервера...");
-                LoadLeaderboardFromServer(authSync);
-            }
-            else
-            {
-                Debug.Log("MainMenuUIController: Обновляю таблицу лидеров из локальных данных...");
-                BuildLeaderboardSections(out var topBalance, out var topLevel);
-                leaderboardPanel.Show(topBalance, topLevel);
-            }
+            Debug.Log("MainMenuUIController: Обновляю таблицу лидеров с сервера...");
+            LoadLeaderboardFromServer(authSync);
         }
         else
         {
-            Debug.Log("MainMenuUIController: Обновляю таблицу лидеров из локальных данных (AuthServerSync не найден)...");
+            Debug.Log("MainMenuUIController: Обновляю таблицу лидеров из локальных данных...");
             BuildLeaderboardSections(out var topBalance, out var topLevel);
             leaderboardPanel.Show(topBalance, topLevel);
         }
@@ -1148,8 +1134,11 @@ public class MainMenuUIController : MonoBehaviour
         // Проверяем недельный лимит и пополняем баланс
         if (currentUser.AddDeposit(amount))
         {
-            // Сохраняем обновленный профиль
+            // Сохраняем обновленный профиль локально
             AuthManager.SaveCurrentUser();
+            
+            // Синхронизируем баланс с сервером, чтобы таблица лидеров видела актуальные данные
+            AuthManager.UpdatePlayerBalance(currentUser.chips);
             
             Debug.Log($"MainMenuUIController: Баланс пополнен на {amount} фишек. Новый баланс: {currentUser.chips}");
             Debug.Log($"MainMenuUIController: Использовано за неделю: {currentUser.currentWeekDeposits}/{currentUser.weeklyDepositLimit}");
@@ -1483,22 +1472,14 @@ public class MainMenuUIController : MonoBehaviour
         topLevel = new List<LeaderboardEntry>();
         
         // Пытаемся загрузить данные со сервера
-        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
-        if (authSync != null)
+        AuthServerSync authSync = AuthServerSync.Instance;
+        if (authSync != null && authSync.UseServerAuth)
         {
-            var useServerAuthField = typeof(AuthServerSync).GetField("useServerAuth", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            bool useServerAuth = useServerAuthField != null && 
-                                (bool)(useServerAuthField.GetValue(authSync) ?? false);
-            
-            if (useServerAuth)
-            {
-                Debug.Log("MainMenuUIController: Используется серверная авторизация, загружаю данные со сервера...");
-                // Загружаем данные со сервера асинхронно
-                // Возвращаем пустые списки, они обновятся когда данные загрузятся
-                LoadLeaderboardFromServer(authSync);
-                return;
-            }
+            Debug.Log("MainMenuUIController: Используется серверная авторизация, загружаю данные со сервера...");
+            // Загружаем данные со сервера асинхронно
+            // Возвращаем пустые списки, они обновятся когда данные загрузятся
+            LoadLeaderboardFromServer(authSync);
+            return;
         }
         
         Debug.Log("MainMenuUIController: Используются локальные данные (серверная авторизация не включена)");
@@ -1545,16 +1526,7 @@ public class MainMenuUIController : MonoBehaviour
     
     private void LoadLeaderboardFromServer(AuthServerSync authSync)
     {
-        // Получаем AuthServerClient через рефлексию
-        var authClientField = typeof(AuthServerSync).GetField("authClient", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var authClient = authClientField?.GetValue(authSync) as AuthServerClient;
-        
-        if (authClient == null)
-        {
-            // Пытаемся найти компонент напрямую
-            authClient = authSync.GetComponent<AuthServerClient>();
-        }
+        var authClient = authSync?.Client ?? authSync?.GetComponent<AuthServerClient>();
         
         if (authClient == null)
         {
@@ -1650,7 +1622,7 @@ public class MainMenuUIController : MonoBehaviour
         if (authClient.IsConnected())
         {
             Debug.Log("MainMenuUIController: Подключение установлено, загружаю таблицу лидеров...");
-            AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
+            AuthServerSync authSync = AuthServerSync.Instance;
             if (authSync != null)
             {
                 LoadLeaderboardFromServer(authSync);
@@ -1706,14 +1678,7 @@ public class MainMenuUIController : MonoBehaviour
 
     private void EnsureAuthServerSync()
     {
-        AuthServerSync authSync = FindObjectOfType<AuthServerSync>();
-        if (authSync == null)
-        {
-            Debug.Log("MainMenuUIController: AuthServerSync не найден, создаю автоматически...");
-            GameObject syncObj = new GameObject("AuthServerSync");
-            authSync = syncObj.AddComponent<AuthServerSync>();
-            Debug.Log("MainMenuUIController: AuthServerSync создан");
-        }
+        AuthServerSync.EnsureInstance();
     }
     
     private void EnsureLeaderboardPanel()
