@@ -153,12 +153,36 @@ namespace WonderPokerCore
         private async Task MakeTurnAsync(int startingPlayerIndex, int participantsCount, CancellationToken cancellationToken)
         {
             bool equalBets = false;
-            while (!equalBets && !cancellationToken.IsCancellationRequested)
+            int maxRounds = 100; // Защита от бесконечного цикла - максимум 100 раундов торговли
+            int roundCount = 0;
+            
+            while (!equalBets && !cancellationToken.IsCancellationRequested && roundCount < maxRounds)
             {
+                roundCount++;
+                bool anyActionThisRound = false;
+                
                 for (int i = 0; i < participantsCount; i++)
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                        return;
+                        
                     int currentIndex = (startingPlayerIndex + i) % gameTable.Players.Count;
+                    
+                    if (currentIndex < 0 || currentIndex >= gameTable.Players.Count)
+                    {
+                        EmitLog($"Error: Invalid player index {currentIndex}. Breaking turn loop.");
+                        equalBets = true;
+                        break;
+                    }
+                    
                     Player player = gameTable.Players[currentIndex];
+
+                    if (player == null)
+                    {
+                        EmitLog($"Error: Player at index {currentIndex} is null. Breaking turn loop.");
+                        equalBets = true;
+                        break;
+                    }
 
                     if (player.Folded || player.AllInMade)
                         continue;
@@ -173,11 +197,48 @@ namespace WonderPokerCore
                     EmitLog($"{player.Nick} turn started");
 
                     bool moveAccepted = false;
-                    while (!moveAccepted && !cancellationToken.IsCancellationRequested)
+                    int maxAttempts = 10; // Защита от бесконечного цикла
+                    int attempts = 0;
+                    
+                    while (!moveAccepted && !cancellationToken.IsCancellationRequested && attempts < maxAttempts)
                     {
-                        var decision = await decisionProvider.RequestDecisionAsync(
-                            new DecisionRequest(gameTable, player, (GameRound)currentRound),
-                            cancellationToken);
+                        attempts++;
+                        
+                        // Добавляем таймаут для запроса решения (максимум 30 секунд)
+                        PlayerDecision decision;
+                        try
+                        {
+                            using (var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+                            using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token))
+                            {
+                                decision = await decisionProvider.RequestDecisionAsync(
+                                    new DecisionRequest(gameTable, player, (GameRound)currentRound),
+                                    linkedCts.Token);
+                            }
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            EmitLog($"Error: {player.Nick} decision request timed out or was cancelled. Forcing Fold.");
+                            decision = new PlayerDecision(PlayerDecisionType.Fold);
+                        }
+                        catch (Exception ex)
+                        {
+                            EmitLog($"Error: {player.Nick} decision request failed: {ex.Message}. Forcing Fold.");
+                            decision = new PlayerDecision(PlayerDecisionType.Fold);
+                        }
+
+                        // Если бот должен сделать олл-ин (недостаточно фишек для колла), принудительно устанавливаем олл-ин
+                        if (decision.Type != PlayerDecisionType.AllIn && 
+                            decision.Type != PlayerDecisionType.Fold &&
+                            player.TokensCount > 0)
+                        {
+                            int callAmount = gameTable.CurrentBid - player.PlayersCurrentBet;
+                            if (callAmount >= player.TokensCount && callAmount > 0)
+                            {
+                                EmitLog($"{player.Nick} forced to All-In (insufficient chips for call: {callAmount} >= {player.TokensCount})");
+                                decision = new PlayerDecision(PlayerDecisionType.AllIn, player.TokensCount);
+                            }
+                        }
 
                         moveAccepted = ApplyDecision(player, decision);
                         if (moveAccepted)
@@ -193,6 +254,46 @@ namespace WonderPokerCore
                             if (gameEndedEarly)
                                 return;
                         }
+                        else
+                        {
+                            EmitLog($"Warning: {player.Nick} decision {decision.Type} ({decision.Amount}) was rejected. Attempt {attempts}/{maxAttempts}");
+                            
+                            // Если решение не принято несколько раз подряд, принудительно делаем фолд или олл-ин
+                            if (attempts >= 3)
+                            {
+                                int callAmount = gameTable.CurrentBid - player.PlayersCurrentBet;
+                                if (player.TokensCount > 0 && callAmount >= player.TokensCount)
+                                {
+                                    EmitLog($"{player.Nick} forced All-In after {attempts} failed attempts");
+                                    decision = new PlayerDecision(PlayerDecisionType.AllIn, player.TokensCount);
+                                    moveAccepted = ApplyDecision(player, decision);
+                                    if (moveAccepted)
+                                    {
+                                        PlayerActionCommitted?.Invoke(player, decision);
+                                        EmitLog($"{player.Nick} -> All-In (forced)");
+                                    }
+                                }
+                                else if (callAmount > 0)
+                                {
+                                    EmitLog($"{player.Nick} forced Fold after {attempts} failed attempts");
+                                    decision = new PlayerDecision(PlayerDecisionType.Fold);
+                                    moveAccepted = ApplyDecision(player, decision);
+                                    if (moveAccepted)
+                                    {
+                                        PlayerActionCommitted?.Invoke(player, decision);
+                                        PlayerFolded?.Invoke(player);
+                                        EmitLog($"{player.Nick} -> Fold (forced)");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!moveAccepted && attempts >= maxAttempts)
+                    {
+                        EmitLog($"Error: {player.Nick} failed to make a valid decision after {maxAttempts} attempts. Forcing fold.");
+                        player.Fold();
+                        PlayerFolded?.Invoke(player);
                     }
 
                     if (AllPlayersExceptOneFolded())
@@ -200,7 +301,28 @@ namespace WonderPokerCore
                         EndGameDueToFold();
                         return;
                     }
+                    
+                    anyActionThisRound = true;
                 }
+                
+                // Если за весь раунд никто не сделал действия, принудительно завершаем
+                if (!anyActionThisRound && !equalBets)
+                {
+                    EmitLog($"Warning: No actions in round {roundCount}, forcing end of betting round");
+                    equalBets = true;
+                }
+                
+                // Дополнительная проверка - если слишком много раундов, принудительно завершаем
+                if (roundCount >= maxRounds)
+                {
+                    EmitLog($"Error: Maximum betting rounds ({maxRounds}) reached. Forcing end of betting round.");
+                    equalBets = true;
+                }
+            }
+            
+            if (roundCount >= maxRounds && !equalBets)
+            {
+                EmitLog($"Critical: Betting round exceeded maximum rounds. Ending turn with potential game state issues.");
             }
         }
 
@@ -226,6 +348,14 @@ namespace WonderPokerCore
                     }
                     return false;
                 case PlayerDecisionType.AllIn:
+                    // Проверяем, что у игрока есть фишки для олл-ина
+                    if (player.TokensCount <= 0)
+                    {
+                        EmitLog($"Warning: {player.Nick} attempted All-In with 0 tokens, forcing fold");
+                        player.Fold();
+                        return true;
+                    }
+                    
                     if (player.AllIn())
                     {
                         if (player.PlayersCurrentBet > gameTable.CurrentBid)
@@ -235,7 +365,11 @@ namespace WonderPokerCore
                         }
                         return true;
                     }
-                    return false;
+                    
+                    // Если AllIn() вернул false, это ошибка - принудительно делаем фолд
+                    EmitLog($"Error: {player.Nick} AllIn() returned false, forcing fold");
+                    player.Fold();
+                    return true;
                 case PlayerDecisionType.Raise:
                     int raiseAmount = Math.Max(0, decision.Amount);
                     if (player.Raise(gameTable.CurrentBid, raiseAmount))
@@ -311,28 +445,43 @@ namespace WonderPokerCore
 
         private List<Player> DetermineWinners()
         {
-            int bestScore = int.MaxValue;
             List<Player> winners = new();
+            CardsCollection bestHand = null;
 
             foreach (Player player in gameTable.Players)
             {
                 if (player.Folded)
                     continue;
 
-                CardsCollection playerCards = player.PlayerHand + gameTable.ShownHelpingCards;
-                playerCards.SortDescending();
-                int score = handsComparer.EvaluateHand(playerCards);
+                // Находим лучшую комбинацию из 7 карт (2 карманные + 5 общих)
+                CardsCollection allCards = player.PlayerHand + gameTable.ShownHelpingCards;
+                CardsCollection playerBestHand = handsComparer.FindBestHand(allCards);
 
-                if (score < bestScore)
+                if (bestHand == null)
                 {
+                    // Первый игрок - автоматически лучший пока
+                    bestHand = playerBestHand;
                     winners.Clear();
                     winners.Add(player);
-                    bestScore = score;
                 }
-                else if (score == bestScore)
+                else
                 {
-                    // Tie – simple tie handling (pot split logic can be improved later)
-                    winners.Add(player);
+                    // Сравниваем с текущим лучшим
+                    int comparison = handsComparer.CompareHandsDetailed(playerBestHand, bestHand);
+                    
+                    if (comparison < 0)
+                    {
+                        // Этот игрок лучше
+                        bestHand = playerBestHand;
+                        winners.Clear();
+                        winners.Add(player);
+                    }
+                    else if (comparison == 0)
+                    {
+                        // Равные руки - добавляем в победители
+                        winners.Add(player);
+                    }
+                    // Если comparison > 0, этот игрок хуже - пропускаем
                 }
             }
 

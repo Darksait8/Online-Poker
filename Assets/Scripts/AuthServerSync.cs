@@ -82,6 +82,16 @@ public class AuthServerSync : MonoBehaviour
     
     private void OnDestroy()
     {
+        Cleanup();
+    }
+    
+    private void OnApplicationQuit()
+    {
+        Cleanup();
+    }
+    
+    private void Cleanup()
+    {
         if (instance == this)
         {
             instance = null;

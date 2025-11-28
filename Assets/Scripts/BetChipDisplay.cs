@@ -275,6 +275,14 @@ public class BetChipDisplay : MonoBehaviour
 
     private List<ChipLayoutEntry> BuildChipLayout(int amount)
     {
+        // Для больших сумм сразу используем агрегированное отображение
+        // Это предотвращает зависание при олл-ине с большим количеством фишек
+        int estimatedChips = EstimateChipCount(amount);
+        if (estimatedChips > maxVisualChips * 2)
+        {
+            return BuildAggregateLayout(amount);
+        }
+
         var distribution = BuildChipDistribution(amount);
         if (distribution.Count == 0)
             return new List<ChipLayoutEntry>();
@@ -289,6 +297,19 @@ public class BetChipDisplay : MonoBehaviour
         return entries;
     }
 
+    private int EstimateChipCount(int amount)
+    {
+        if (chipSet == null || chipSet.Length == 0)
+            return 0;
+
+        int smallestValue = chipValuesAsc != null && chipValuesAsc.Length > 0 
+            ? chipValuesAsc[0] 
+            : chipSet.Where(c => c.value > 0 && c.sprite != null).Min(c => (int?)c.value) ?? 1000;
+        
+        // Оценка количества фишек при использовании минимального номинала
+        return Mathf.CeilToInt(amount / (float)Mathf.Max(1, smallestValue));
+    }
+
     private Dictionary<int, int> BuildChipDistribution(int amount)
     {
         var distribution = new Dictionary<int, int>();
@@ -296,23 +317,40 @@ public class BetChipDisplay : MonoBehaviour
             return distribution;
 
         int remaining = amount;
+        int maxIterations = 1000; // Защита от бесконечного цикла
+        int iterations = 0;
 
         foreach (var chip in chipSet)
         {
             if (chip.value <= 0 || chip.sprite == null)
                 continue;
 
+            if (remaining <= 0 || iterations >= maxIterations)
+                break;
+
             int count = remaining / chip.value;
             if (count <= 0)
                 continue;
 
+            // Ограничиваем количество фишек одного номинала для предотвращения зависания
+            int maxChipsPerDenomination = maxVisualChips * 2;
+            if (count > maxChipsPerDenomination)
+            {
+                count = maxChipsPerDenomination;
+                remaining = remaining - (count * chip.value);
+            }
+            else
+            {
+                remaining -= count * chip.value;
+            }
+
             if (!distribution.ContainsKey(chip.value))
                 distribution[chip.value] = 0;
             distribution[chip.value] += count;
-            remaining -= count * chip.value;
+            iterations++;
         }
 
-        if (remaining > 0)
+        if (remaining > 0 && iterations < maxIterations)
         {
             var smallest = GetSmallestChip();
             if (smallest.sprite != null && smallest.value > 0)
@@ -337,12 +375,25 @@ public class BetChipDisplay : MonoBehaviour
             return;
 
         bool modified;
-        int safety = 256;
+        int safety = 1000; // Увеличено для больших сумм, но все равно ограничено
+        int consecutiveNoChange = 0;
         do
         {
             modified = TryPromoteOnce(distribution);
-            total = distribution.Values.Sum();
+            int newTotal = distribution.Values.Sum();
+            
+            // Если общее количество не изменилось, увеличиваем счетчик
+            if (newTotal == total)
+                consecutiveNoChange++;
+            else
+                consecutiveNoChange = 0;
+            
+            total = newTotal;
             safety--;
+            
+            // Прерываем, если несколько итераций подряд не дали результата
+            if (consecutiveNoChange > 10)
+                break;
         } while (modified && total > limit && safety > 0);
     }
 

@@ -2,9 +2,6 @@
 using UnityEditor;
 using UnityEngine;
 
-/// <summary>
-/// Ручной запуск набора проверок UserProfile без NUnit.
-/// </summary>
 public static class UserProfileTests
 {
     [MenuItem("Tests/Run UserProfile Checks")]

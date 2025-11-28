@@ -66,7 +66,7 @@ public class GameOverPanel : MonoBehaviour
         TryInitialize();
     }
 
-    public void Show(string winnerName, int winnerStack, int totalHandsPlayed = 0)
+    public void Show(string winnerName, int winnerStack, int totalHandsPlayed = 0, bool showRestartButton = true)
     {
         TryInitialize();
 
@@ -78,6 +78,12 @@ public class GameOverPanel : MonoBehaviour
             summaryText.text = $"Победитель: {winnerName}\n" +
                                $"Стек: {winnerStack}\n" +
                                (totalHandsPlayed > 0 ? $"Сыграно раздач: {totalHandsPlayed}" : string.Empty);
+        }
+
+        // Скрываем или показываем кнопку перезапуска
+        if (restartButton != null)
+        {
+            restartButton.gameObject.SetActive(showRestartButton);
         }
 
         gameObject.SetActive(true);

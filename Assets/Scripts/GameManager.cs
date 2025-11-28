@@ -623,23 +623,105 @@ public class GameManager : MonoBehaviour
         if (view == null || view.ui == null)
             return;
 
-        var cards = view.legacy.HoleCards;
-        if (cards == null || cards.Length < 2)
+        Card[] cards = null;
+
+        // Сначала пытаемся получить карты из core.PlayerHand (основной источник)
+        var coreCards = view.core?.PlayerHand?.Cards;
+        if (coreCards != null && coreCards.Count >= 2)
         {
-            var coreCards = view.core?.PlayerHand?.Cards;
-            if (coreCards != null && coreCards.Count >= 2)
+            cards = new[]
             {
+                WonderCardConverter.ToClientCard(coreCards[0]),
+                WonderCardConverter.ToClientCard(coreCards[1])
+            };
+            // Сохраняем в legacy для будущего использования
+            if (view.legacy != null)
+            {
+                view.legacy.HoleCards = cards;
+            }
+        }
+        // Если не получилось из core, пробуем legacy
+        else if (view.legacy != null)
+        {
+            cards = view.legacy.HoleCards;
+        }
+
+        // Показываем карты, если они есть
+        if (cards != null && cards.Length >= 2)
+        {
+            view.ui.ShowHole(cards[0], cards[1]);
+        }
+    }
+
+    private void RevealAllPlayerCards()
+    {
+        // Переворачиваем карты всех игроков, которые не сфолдили
+        foreach (var view in runtimePlayers)
+        {
+            if (view == null || view.ui == null)
+                continue;
+
+            // Пропускаем игроков, которые сфолдили
+            if (view.legacy != null && view.legacy.Status == PlayerStatus.Folded)
+                continue;
+            if (view.core != null && view.core.Folded)
+                continue;
+
+            // Получаем карты из всех возможных источников
+            Card[] cards = null;
+
+            // 1. Пробуем получить из gameTable (самый надежный источник)
+            if (view.core != null && gameTable != null && gameTable.Players != null)
+            {
+                var playerInTable = gameTable.Players.FirstOrDefault(p => p == view.core);
+                if (playerInTable != null && playerInTable.PlayerHand != null && 
+                    playerInTable.PlayerHand.Cards != null && playerInTable.PlayerHand.Cards.Count >= 2)
+                {
+                    var coreCards = playerInTable.PlayerHand.Cards;
+                    cards = new[]
+                    {
+                        WonderCardConverter.ToClientCard(coreCards[0]),
+                        WonderCardConverter.ToClientCard(coreCards[1])
+                    };
+                    // Обновляем карты в view
+                    if (view.legacy != null)
+                    {
+                        view.legacy.HoleCards = cards;
+                    }
+                    // Обновляем в core для будущего использования
+                    view.core.PlayerHand = playerInTable.PlayerHand;
+                }
+            }
+
+            // 2. Если не получилось из gameTable, пробуем из view.core
+            if (cards == null && view.core != null && view.core.PlayerHand != null && 
+                view.core.PlayerHand.Cards != null && view.core.PlayerHand.Cards.Count >= 2)
+            {
+                var coreCards = view.core.PlayerHand.Cards;
                 cards = new[]
                 {
                     WonderCardConverter.ToClientCard(coreCards[0]),
                     WonderCardConverter.ToClientCard(coreCards[1])
                 };
-                view.legacy.HoleCards = cards;
+                if (view.legacy != null)
+                {
+                    view.legacy.HoleCards = cards;
+                }
+            }
+
+            // 3. Если не получилось, пробуем из legacy
+            if (cards == null && view.legacy != null && view.legacy.HoleCards != null && 
+                view.legacy.HoleCards.Length >= 2)
+            {
+                cards = view.legacy.HoleCards;
+            }
+
+            // Показываем карты, если они найдены
+            if (cards != null && cards.Length >= 2)
+            {
+                view.ui.ShowHole(cards[0], cards[1]);
             }
         }
-
-        if (cards != null && cards.Length >= 2)
-            view.ui.ShowHole(cards[0], cards[1]);
     }
 
     private void HandleBlindPaid(WonderPokerCore.Player player, int amount)
@@ -680,6 +762,18 @@ public class GameManager : MonoBehaviour
     {
         if (!coreToView.TryGetValue(player, out var view))
             return;
+
+        // Не показываем карты, если игрок сфолдил
+        if (view.legacy != null && view.legacy.Status == PlayerStatus.Folded)
+        {
+            view.ui.HideHoles();
+            return;
+        }
+        if (view.core != null && view.core.Folded)
+        {
+            view.ui.HideHoles();
+            return;
+        }
 
         var hand = player.PlayerHand.Cards;
         if (hand == null || hand.Count < 2)
@@ -752,6 +846,9 @@ public class GameManager : MonoBehaviour
 
     private void HandleWinnersDetermined(IReadOnlyList<WonderPokerCore.Player> winners)
     {
+        // Переворачиваем карты всех игроков, которые не сфолдили
+        RevealAllPlayerCards();
+
         var winnerViews = winners?
             .Select(w => coreToView.TryGetValue(w, out var view) ? view : null)
             .Where(v => v != null)
@@ -807,6 +904,30 @@ public class GameManager : MonoBehaviour
         OnShowdown?.Invoke(legacyWinners);
         UpdateAllPlayerStacksFromCore();
         ResetPotValue();
+        
+        // Обновляем баланс для всех игроков, включая проигравших
+        // ВАЖНО: Делаем это ПОСЛЕ UpdateAllPlayerStacksFromCore, чтобы legacy.Stack был синхронизирован с core.TokensCount
+        // Это важно, особенно когда игрок сделал олл-ин и проиграл
+        if (currentUser != null)
+        {
+            PlayerSeatView humanSeatView = GetHumanSeatView();
+            if (humanSeatView != null)
+            {
+                bool isWinner = winnerViews.Contains(humanSeatView);
+                // Если игрок не победитель, обновляем его баланс (он мог проиграть олл-ин)
+                if (!isWinner)
+                {
+                    // После UpdateAllPlayerStacksFromCore legacy.Stack должен быть синхронизирован с core.TokensCount
+                    int finalBalance = humanSeatView.core != null
+                        ? humanSeatView.core.TokensCount
+                        : humanSeatView.legacy?.Stack ?? 0;
+                    
+                    AuthManager.UpdatePlayerBalance(finalBalance);
+                    Debug.Log($"GameManager: Обновлен баланс проигравшего игрока (после олл-ина): {finalBalance} фишек (core: {humanSeatView.core?.TokensCount}, legacy: {humanSeatView.legacy?.Stack})");
+                }
+            }
+        }
+        
         handResultPopup?.Show(messageBuilder.ToString(), delayBeforeNextHand);
     }
 
@@ -1325,6 +1446,9 @@ public class GameManager : MonoBehaviour
         matchFinished = true;
         Time.timeScale = 0f;
 
+        // Обновляем стеки перед сохранением баланса
+        UpdateAllPlayerStacksFromCore();
+
         // Сохраняем финальный баланс для реального игрока
         UserProfile currentUser = AuthManager.CurrentUser;
         bool winnerIsHuman = winner != null && IsHumanPlayer(winner.core);
@@ -1341,14 +1465,17 @@ public class GameManager : MonoBehaviour
             if (!winnerIsHuman)
             {
                 AuthManager.UpdatePlayerBalance(finalBalance);
-                Debug.Log($"GameManager: Сохранен финальный баланс {finalBalance} фишек (игрок {currentUser.username} проиграл)");
+                Debug.Log($"GameManager: Сохранен финальный баланс {finalBalance} фишек (игрок {currentUser.username} проиграл) (core: {humanSeatView.core?.TokensCount}, legacy: {humanSeatView.legacy?.Stack})");
             }
         }
 
         string winnerName = winner?.legacy?.Name ?? "Игрок";
         int winnerStack = winner?.legacy?.Stack ?? 0;
+        
+        // Скрываем кнопку перезапуска, если игрок проиграл (не является победителем)
+        bool showRestart = winnerIsHuman;
 
-        gameOverPanel.Show(winnerName, winnerStack, handCounter);
+        gameOverPanel.Show(winnerName, winnerStack, handCounter, showRestart);
     }
 
     private void HandleUserProfileChanged(UserProfile profile)

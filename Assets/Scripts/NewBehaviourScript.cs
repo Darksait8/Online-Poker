@@ -43,10 +43,69 @@ public class NewBehaviourScript : MonoBehaviour
 
     private void Awake()
     {
+        EnsureHoleCards(); // Сначала убеждаемся, что Hole1 и Hole2 привязаны
         EnsureHoleCardBack();
         EnsureChipDisplay();
         SetHoleCardSizes();
         ShowChips(false);
+    }
+    
+    private void EnsureHoleCards()
+    {
+        // Если hole1Image не привязан, ищем Hole1 в иерархии
+        if (hole1Image == null)
+        {
+            Transform hole1Transform = transform.Find("Hole1");
+            if (hole1Transform != null)
+            {
+                hole1Image = hole1Transform.GetComponent<Image>();
+            }
+        }
+        
+        // Если hole2Image не привязан, ищем Hole2 в иерархии
+        if (hole2Image == null)
+        {
+            Transform hole2Transform = transform.Find("Hole2");
+            if (hole2Transform != null)
+            {
+                hole2Image = hole2Transform.GetComponent<Image>();
+            }
+        }
+        
+        // Если все еще нет, создаем их
+        if (hole1Image == null)
+        {
+            GameObject hole1GO = new GameObject("Hole1");
+            hole1GO.transform.SetParent(transform, false);
+            RectTransform hole1Rect = hole1GO.AddComponent<RectTransform>();
+            hole1Rect.anchorMin = hole1Rect.anchorMax = new Vector2(0.5f, 0.5f);
+            hole1Rect.pivot = new Vector2(0.5f, 0.5f);
+            hole1Rect.sizeDelta = holeCardSize;
+            hole1Rect.anchoredPosition = Vector2.zero;
+            
+            hole1Image = hole1GO.AddComponent<Image>();
+            hole1Image.color = Color.white;
+            hole1Image.type = Image.Type.Simple;
+            hole1Image.preserveAspect = true;
+            hole1Image.enabled = false;
+        }
+        
+        if (hole2Image == null)
+        {
+            GameObject hole2GO = new GameObject("Hole2");
+            hole2GO.transform.SetParent(transform, false);
+            RectTransform hole2Rect = hole2GO.AddComponent<RectTransform>();
+            hole2Rect.anchorMin = hole2Rect.anchorMax = new Vector2(0.5f, 0.5f);
+            hole2Rect.pivot = new Vector2(0.5f, 0.5f);
+            hole2Rect.sizeDelta = holeCardSize;
+            hole2Rect.anchoredPosition = Vector2.zero;
+            
+            hole2Image = hole2GO.AddComponent<Image>();
+            hole2Image.color = Color.white;
+            hole2Image.type = Image.Type.Simple;
+            hole2Image.preserveAspect = true;
+            hole2Image.enabled = false;
+        }
     }
 
     private void SetHoleCardSizes()
@@ -194,8 +253,19 @@ public class NewBehaviourScript : MonoBehaviour
 
     public void HideHoles()
     {
-        if (hole1Image != null) hole1Image.enabled = false;
-        if (hole2Image != null) hole2Image.enabled = false;
+        // Всегда скрываем карты при вызове этого метода
+        // Это нужно для случаев, когда игрок пасует (фолдит)
+        if (hole1Image != null)
+        {
+            hole1Image.enabled = false;
+            hole1Image.sprite = null;
+        }
+        if (hole2Image != null)
+        {
+            hole2Image.enabled = false;
+            hole2Image.sprite = null;
+        }
+        
         chipDisplay?.Show(false);
     }
 

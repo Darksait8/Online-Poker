@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using UnityEngine;
 using HoldemPlayerContract;
 using WonderPokerCore;
 using CorePlayer = WonderPokerCore.Player;
@@ -84,54 +85,127 @@ public sealed class HoldemBotWrapper : IPlayerDecisionProvider
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
-        var table = _tableGetter();
-        var stage = ToStage(request.Round);
-
-        var contributionsSnapshot = GetContributionsSnapshot();
-        int callLevel = contributionsSnapshot.Values.Count > 0 ? contributionsSnapshot.Values.Max() : table.CurrentBid;
-        contributionsSnapshot.TryGetValue(_corePlayer, out var myContribution);
-        int callAmount = Math.Max(0, callLevel - myContribution);
-
-        int lastFullRaise = Math.Max(_lastFullRaiseGetter(), table.Settings.BigBlind);
-        int minRaise = callAmount + lastFullRaise;
-
-        int maxRaise = callAmount + Math.Min(_corePlayer.TokensCount, GetMaxOpponentContribution(contributionsSnapshot));
-        if (maxRaise < callAmount)
-            maxRaise = callAmount;
-
-        int raisesRemaining = _raisesPerRoundGetter();
-        if (raisesRemaining <= 0)
-            raisesRemaining = 0;
-
-        int potSize = Math.Max(table.TokensInGame, contributionsSnapshot.Values.Sum());
-
-        _bot.GetAction(stage,
-                       _corePlayer.PlayersCurrentBet,
-                       callAmount,
-                       minRaise,
-                       maxRaise,
-                       raisesRemaining,
-                       potSize,
-                       out var action,
-                       out var amount);
-
-        var decision = ConvertAction(action, amount, callAmount);
-        decision = MaybeInjectMistake(decision, callAmount);
-
-        int delay = _random.Next(_minThinkMilliseconds, _maxThinkMilliseconds + 1);
-        if (delay > 0)
+        try
         {
+            var table = _tableGetter();
+            if (table == null)
+            {
+                Debug.LogError($"[Bot {_corePlayer?.Nick ?? "Unknown"}] Table is null, defaulting to Fold");
+                return new PlayerDecision(PlayerDecisionType.Fold);
+            }
+
+            var stage = ToStage(request.Round);
+
+            var contributionsSnapshot = GetContributionsSnapshot();
+            int callLevel = contributionsSnapshot.Values.Count > 0 ? contributionsSnapshot.Values.Max() : table.CurrentBid;
+            contributionsSnapshot.TryGetValue(_corePlayer, out var myContribution);
+            
+            int availableTokens = _corePlayer?.TokensCount ?? 0;
+            int currentBet = _corePlayer?.PlayersCurrentBet ?? 0;
+            int maxAffordableCall = availableTokens + currentBet;
+            
+            // Ограничиваем callAmount доступными фишками бота
+            int callAmount = Math.Max(0, Math.Min(callLevel - myContribution, maxAffordableCall));
+            
+            // Если callAmount больше доступных фишек, бот должен сделать олл-ин или фолд
+            bool mustAllInOrFold = callAmount >= availableTokens && callAmount > 0;
+
+            int lastFullRaise = Math.Max(_lastFullRaiseGetter(), table.Settings?.BigBlind ?? 20);
+            
+            // Ограничиваем minRaise доступными фишками
+            int minRaise = Math.Min(callAmount + lastFullRaise, callAmount + availableTokens);
+            
+            // Ограничиваем maxRaise доступными фишками бота
+            int maxOpponentContribution = GetMaxOpponentContribution(contributionsSnapshot);
+            int maxRaise = Math.Min(callAmount + availableTokens, callAmount + Math.Min(availableTokens, maxOpponentContribution));
+            if (maxRaise < callAmount)
+                maxRaise = callAmount;
+            
+            // Если бот не может сделать минимальный рейз, ограничиваем minRaise
+            if (minRaise > callAmount + availableTokens)
+                minRaise = callAmount + availableTokens;
+
+            int raisesRemaining = _raisesPerRoundGetter();
+            if (raisesRemaining <= 0)
+                raisesRemaining = 0;
+
+            int potSize = Math.Max(table.TokensInGame, contributionsSnapshot.Values.Sum());
+
+            // Защита от зависания бота - ограничиваем параметры разумными значениями
+            callAmount = Math.Max(0, Math.Min(callAmount, availableTokens + currentBet));
+            minRaise = Math.Max(0, Math.Min(minRaise, availableTokens + currentBet));
+            maxRaise = Math.Max(0, Math.Min(maxRaise, availableTokens + currentBet));
+            potSize = Math.Max(0, Math.Min(potSize, int.MaxValue / 2)); // Защита от переполнения
+
+            // Дополнительная проверка для предотвращения некорректных значений
+            if (callAmount < 0 || minRaise < 0 || maxRaise < 0 || potSize < 0)
+            {
+                Debug.LogError($"[Bot {_corePlayer?.Nick ?? "Unknown"}] Invalid parameters: callAmount={callAmount}, minRaise={minRaise}, maxRaise={maxRaise}, potSize={potSize}. Defaulting to Fold.");
+                return new PlayerDecision(PlayerDecisionType.Fold);
+            }
+
+            ActionType action;
+            int amount;
+            
             try
             {
-                await Task.Delay(delay, cancellationToken);
+                _bot.GetAction(stage,
+                               currentBet,
+                               callAmount,
+                               minRaise,
+                               maxRaise,
+                               raisesRemaining,
+                               potSize,
+                               out action,
+                               out amount);
             }
-            catch (TaskCanceledException)
+            catch (Exception ex)
             {
-                // пропускаем задержку, если отменено
+                Debug.LogError($"[Bot {_corePlayer?.Nick ?? "Unknown"}] GetAction threw exception: {ex.Message}. Stack trace: {ex.StackTrace}. Defaulting to Fold.");
+                action = ActionType.Fold;
+                amount = 0;
             }
-        }
 
-        return decision;
+            // Проверяем корректность ответа бота
+            if (amount < 0)
+                amount = 0;
+            if (amount > availableTokens)
+                amount = availableTokens;
+
+            var decision = ConvertAction(action, amount, callAmount, mustAllInOrFold);
+            
+            // Если бот должен сделать олл-ин или фолд, но выбрал другое действие, конвертируем в олл-ин
+            if (mustAllInOrFold && decision.Type != PlayerDecisionType.Fold && decision.Type != PlayerDecisionType.AllIn)
+            {
+                // Если есть фишки, делаем олл-ин, иначе фолд
+                if (availableTokens > 0)
+                    decision = new PlayerDecision(PlayerDecisionType.AllIn, availableTokens);
+                else
+                    decision = new PlayerDecision(PlayerDecisionType.Fold);
+            }
+            
+            decision = MaybeInjectMistake(decision, callAmount);
+
+            int delay = _random.Next(_minThinkMilliseconds, _maxThinkMilliseconds + 1);
+            if (delay > 0)
+            {
+                try
+                {
+                    await Task.Delay(delay, cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    // пропускаем задержку, если отменено
+                }
+            }
+
+            return decision;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[Bot {_corePlayer?.Nick ?? "Unknown"}] RequestDecisionAsync exception: {ex.Message}. Stack trace: {ex.StackTrace}. Defaulting to Fold.");
+            return new PlayerDecision(PlayerDecisionType.Fold);
+        }
     }
 
     private Dictionary<CorePlayer, int> GetContributionsSnapshot()
@@ -142,6 +216,7 @@ public sealed class HoldemBotWrapper : IPlayerDecisionProvider
     private int GetMaxOpponentContribution(Dictionary<CorePlayer, int> contributions)
     {
         int maxOpponentCall = 0;
+        int botMaxAffordable = _corePlayer.TokensCount + _corePlayer.PlayersCurrentBet;
 
         foreach (var pair in contributions)
         {
@@ -150,6 +225,11 @@ public sealed class HoldemBotWrapper : IPlayerDecisionProvider
 
             _stackAtHandStart.TryGetValue(pair.Key, out var stackAtStart);
             int maxContribution = Math.Min(stackAtStart, pair.Value + pair.Key.TokensCount + pair.Key.PlayersCurrentBet);
+            
+            // Ограничиваем максимальный вклад оппонента доступными фишками бота
+            // чтобы избежать проблем с очень большими ставками
+            maxContribution = Math.Min(maxContribution, botMaxAffordable);
+            
             if (maxContribution > maxOpponentCall)
                 maxOpponentCall = maxContribution;
         }
@@ -157,9 +237,10 @@ public sealed class HoldemBotWrapper : IPlayerDecisionProvider
         return maxOpponentCall;
     }
 
-    private PlayerDecision ConvertAction(ActionType action, int amount, int callAmount)
+    private PlayerDecision ConvertAction(ActionType action, int amount, int callAmount, bool mustAllInOrFold = false)
     {
         var availableTokens = _corePlayer.TokensCount;
+        int maxAffordable = availableTokens + _corePlayer.PlayersCurrentBet;
 
         switch (action)
         {
@@ -169,24 +250,43 @@ public sealed class HoldemBotWrapper : IPlayerDecisionProvider
                 return new PlayerDecision(PlayerDecisionType.Fold);
 
             case ActionType.Check:
+                // Если нужно сделать олл-ин или фолд, нельзя чекнуть
+                if (mustAllInOrFold && callAmount > 0)
+                    return new PlayerDecision(PlayerDecisionType.Fold);
                 return new PlayerDecision(PlayerDecisionType.Check);
 
             case ActionType.Call:
-                int callValue = Math.Min(callAmount, availableTokens + _corePlayer.PlayersCurrentBet);
+                int callValue = Math.Min(callAmount, maxAffordable);
                 if (callValue <= 0)
                     return new PlayerDecision(PlayerDecisionType.Check);
+                
+                // Если колл требует всех фишек, это олл-ин
+                if (callValue >= availableTokens)
+                    return new PlayerDecision(PlayerDecisionType.AllIn, availableTokens);
+                
                 return new PlayerDecision(PlayerDecisionType.Call);
 
             case ActionType.Raise:
                 int totalBet = Math.Max(amount, callAmount);
                 totalBet = Math.Min(totalBet, callAmount + availableTokens);
                 int raiseAmount = Math.Max(0, totalBet - callAmount);
+                
                 if (raiseAmount <= 0)
                 {
                     if (callAmount <= 0)
                         return new PlayerDecision(PlayerDecisionType.Check);
+                    
+                    // Если колл требует всех фишек, это олл-ин
+                    if (callAmount >= availableTokens)
+                        return new PlayerDecision(PlayerDecisionType.AllIn, availableTokens);
+                    
                     return new PlayerDecision(PlayerDecisionType.Call);
                 }
+                
+                // Если рейз требует всех фишек, это олл-ин
+                if (raiseAmount >= availableTokens || totalBet >= callAmount + availableTokens)
+                    return new PlayerDecision(PlayerDecisionType.AllIn, availableTokens);
+                
                 return new PlayerDecision(PlayerDecisionType.Raise, raiseAmount);
 
             case ActionType.Show:
@@ -214,15 +314,32 @@ public sealed class HoldemBotWrapper : IPlayerDecisionProvider
         if (_random.NextDouble() > _mistakeProbability)
             return originalDecision;
 
+        int availableTokens = _corePlayer.TokensCount;
+        bool mustAllInOrFold = callAmount >= availableTokens && callAmount > 0;
+        
+        // Не меняем решение, если бот должен сделать олл-ин или фолд
+        if (mustAllInOrFold && (originalDecision.Type == PlayerDecisionType.AllIn || originalDecision.Type == PlayerDecisionType.Fold))
+            return originalDecision;
+
         switch (originalDecision.Type)
         {
             case PlayerDecisionType.Fold:
             case PlayerDecisionType.Check:
+                // Если нужно сделать олл-ин, не меняем на колл
+                if (mustAllInOrFold)
+                    return originalDecision;
                 return new PlayerDecision(PlayerDecisionType.Call);
             case PlayerDecisionType.Call:
-                return new PlayerDecision(PlayerDecisionType.Raise, Math.Max(1, callAmount / 2));
+                // Если колл требует всех фишек, не меняем на рейз
+                if (callAmount >= availableTokens)
+                    return originalDecision;
+                int raiseAmount = Math.Max(1, Math.Min(callAmount / 2, availableTokens));
+                return new PlayerDecision(PlayerDecisionType.Raise, raiseAmount);
             case PlayerDecisionType.Raise:
                 return new PlayerDecision(PlayerDecisionType.Call);
+            case PlayerDecisionType.AllIn:
+                // Не меняем олл-ин на другое действие
+                return originalDecision;
             default:
                 return originalDecision;
         }

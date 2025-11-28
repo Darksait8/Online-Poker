@@ -6,12 +6,28 @@ public class Deck
     private readonly List<Card> cards = new List<Card>(52);
     private int index;
     private Random rng;
+    private static int shuffleCounter = 0; // Счетчик для дополнительной энтропии
 
     public Deck()
     {
-        // Используем время для более случайного seed
-        rng = new Random((int)(DateTime.Now.Ticks & 0x0000FFFF));
+        // Используем комбинацию нескольких источников энтропии для более надежного seed
+        int seed = GenerateSecureSeed();
+        rng = new Random(seed);
         Reset();
+    }
+
+    private int GenerateSecureSeed()
+    {
+        // Комбинируем несколько источников энтропии для максимальной случайности
+        unchecked
+        {
+            int seed = (int)DateTime.Now.Ticks;
+            seed ^= Environment.TickCount;
+            seed ^= Guid.NewGuid().GetHashCode();
+            seed ^= (shuffleCounter++ << 16);
+            seed ^= UnityEngine.Random.Range(int.MinValue, int.MaxValue);
+            return seed;
+        }
     }
 
     public void Reset()
@@ -39,16 +55,15 @@ public class Deck
     public void Shuffle()
     {
         // Создаем новый Random для каждой перетасовки с новым seed
-        rng = new Random((int)(DateTime.Now.Ticks & 0x0000FFFF) + UnityEngine.Random.Range(0, 10000));
+        int seed = GenerateSecureSeed();
+        rng = new Random(seed);
         
-        // Улучшенный Fisher–Yates с несколькими проходами
-        for (int pass = 0; pass < 3; pass++) // 3 прохода для лучшей случайности
+        // Правильный алгоритм Fisher–Yates shuffle (один проход достаточен)
+        // Этот алгоритм гарантирует равномерное распределение всех перестановок
+        for (int i = cards.Count - 1; i > 0; i--)
         {
-            for (int i = cards.Count - 1; i > 0; i--)
-            {
-                int j = rng.Next(i + 1);
-                (cards[i], cards[j]) = (cards[j], cards[i]);
-            }
+            int j = rng.Next(i + 1);
+            (cards[i], cards[j]) = (cards[j], cards[i]);
         }
         index = 0;
         
