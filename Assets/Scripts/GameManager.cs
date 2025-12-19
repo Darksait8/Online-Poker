@@ -7,10 +7,13 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using Photon.Pun;
 using WonderPokerCore;
 using HoldemPlayerContract;
 using HoldemBots.BetterBot;
 using HoldemBots.RandomBot;
+using HoldemBots.EasyBot;
+using HoldemBots.HardBot;
 using CorePlayer = WonderPokerCore.Player;
 using HoldemCard = HoldemPlayerContract.Card;
 using HoldemPlayerInfo = HoldemPlayerContract.PlayerInfo;
@@ -94,12 +97,15 @@ public class GameManager : MonoBehaviour
         public Sprite avatarSprite;
     }
 
+    private NetworkGameManager networkManager;
+    
     private void Awake()
     {
         boardController ??= FindObjectOfType<BoardController>();
         actionPanel ??= FindObjectOfType<ActionPanelController>();
         seatsLayout ??= FindObjectOfType<SeatsLayoutRadial>();
         unifiedPlayerManager ??= FindObjectOfType<UnifiedPlayerManager>();
+        networkManager = NetworkGameManager.Instance;
         matchFinished = false;
 
         var legacyStateMachine = FindObjectOfType<GameStateMachine>();
@@ -140,6 +146,19 @@ public class GameManager : MonoBehaviour
     {
         EnsureReferences();
         yield return null;
+        
+        // Загружаем настройки блайндов из TableRuntimeConfig, если они есть
+        if (TableRuntimeConfig.HasConfig)
+        {
+            smallBlind = TableRuntimeConfig.SmallBlind;
+            bigBlind = TableRuntimeConfig.BigBlind;
+            Debug.Log($"GameManager: Используем блайнды из TableRuntimeConfig - Small: {smallBlind}, Big: {bigBlind}");
+        }
+        else
+        {
+            Debug.Log($"GameManager: TableRuntimeConfig не установлен, используем значения по умолчанию - Small: {smallBlind}, Big: {bigBlind}");
+        }
+        
         InitializeRuntimePlayers();
         SetupController();
         StartNewHand();
@@ -421,6 +440,12 @@ public class GameManager : MonoBehaviour
         pots = new List<int> { 0 };
         communityCards.Clear();
         SetPhase(GamePhase.PreFlop);
+        
+        // Синхронизируем начало игры через сеть
+        if (networkManager != null && TableRuntimeConfig.IsOnlineTable && PhotonNetwork.IsMasterClient)
+        {
+            networkManager.SendGameState((int)currentPhase, currentPlayerIndex, currentBet, pots[0]);
+        }
 
         boardController?.Clear();
         ShowActionPanel();
@@ -462,6 +487,7 @@ public class GameManager : MonoBehaviour
 
     private void HandleGameEnded()
     {
+        if (this == null) return;
         SetPhase(GamePhase.HandComplete);
         foreach (var view in runtimePlayers)
         {
@@ -540,6 +566,12 @@ public class GameManager : MonoBehaviour
         currentPlayerIndex = players.IndexOf(view.legacy);
         HighlightCurrentPlayer(view);
         OnPlayerTurn?.Invoke(view.legacy);
+        
+        // Синхронизируем ход игрока через сеть
+        if (networkManager != null && TableRuntimeConfig.IsOnlineTable)
+        {
+            networkManager.SendGameState((int)currentPhase, currentPlayerIndex, currentBet, pots[0]);
+        }
     }
 
     private void HandlePlayerActionCommitted(WonderPokerCore.Player player, PlayerDecision decision)
@@ -573,6 +605,16 @@ public class GameManager : MonoBehaviour
         pots[0] = gameTable.TokensInGame;
 
         OnPlayerAction?.Invoke(view.legacy, actionName, decision.Amount);
+        
+        // Синхронизируем действие через сеть
+        if (networkManager != null && TableRuntimeConfig.IsOnlineTable)
+        {
+            int seatIndex = seatIndexByPlayer.TryGetValue(player, out int seat) ? seat : -1;
+            networkManager.SendPlayerAction(view.legacy.Name, actionName, decision.Amount, seatIndex);
+            
+            // Отправляем обновленное состояние игры
+            networkManager.SendGameState((int)currentPhase, currentPlayerIndex, currentBet, pots[0]);
+        }
 
         int previousContribution = playerContributions.TryGetValue(player, out var prevValue) ? prevValue : 0;
         int highestContribution = playerContributions.Count > 0 ? playerContributions.Values.Max() : previousContribution;
@@ -789,6 +831,8 @@ public class GameManager : MonoBehaviour
         };
 
         bool isHumanSeat = seatIndexByPlayer.TryGetValue(player, out int seatIndex) && seatIndex == humanSeatIndex;
+        bool isLocalPlayer = isHumanSeat;
+        
         if (isHumanSeat)
         {
             view.ui.ShowHole(clientCards[0], clientCards[1]);
@@ -799,6 +843,12 @@ public class GameManager : MonoBehaviour
         }
         view.legacy.HoleCards[0] = clientCards[0];
         view.legacy.HoleCards[1] = clientCards[1];
+        
+        // Синхронизируем карты игрока через сеть (только мастер-клиент отправляет карты)
+        if (networkManager != null && TableRuntimeConfig.IsOnlineTable && PhotonNetwork.IsMasterClient)
+        {
+            networkManager.SendPlayerCards(view.legacy.Name, seatIndex, clientCards, isLocalPlayer);
+        }
 
         if (botWrappers.TryGetValue(player, out var wrapper))
         {
@@ -828,6 +878,12 @@ public class GameManager : MonoBehaviour
             SetPhase(GamePhase.Turn);
         else if (cards.Length == 5)
             SetPhase(GamePhase.River);
+        
+        // Синхронизируем общие карты через сеть
+        if (networkManager != null && TableRuntimeConfig.IsOnlineTable && PhotonNetwork.IsMasterClient)
+        {
+            networkManager.SendCommunityCards(cards);
+        }
 
         if (botWrappers.Count > 0 && collection?.Cards != null)
         {
@@ -879,7 +935,35 @@ public class GameManager : MonoBehaviour
             bool isHuman = view.core is HumanPlayer || (!enableBots || (seatIndexByPlayer.TryGetValue(view.core, out int seatIdx) && seatIdx == humanSeatIndex));
             if (isHuman && currentUser != null)
             {
-                xpGain = 100; // Начисляем XP только реальному игроку
+                // Награды зависят от сложности стола
+                TableDifficulty difficulty = TableRuntimeConfig.Difficulty;
+                int baseXp = 0;
+                float xpMultiplier = 1.0f;
+                float chipsMultiplier = 1.0f;
+                
+                switch (difficulty)
+                {
+                    case TableDifficulty.Easy:
+                        baseXp = 50; // Мало XP на легкой сложности
+                        xpMultiplier = 0.5f;
+                        chipsMultiplier = 0.5f; // Меньше денег можно выиграть
+                        break;
+                    case TableDifficulty.Medium:
+                        baseXp = 100; // Стандартное количество XP
+                        xpMultiplier = 1.0f;
+                        chipsMultiplier = 1.0f;
+                        break;
+                    case TableDifficulty.Hard:
+                        baseXp = 200; // Больше XP на тяжелой сложности
+                        xpMultiplier = 2.0f;
+                        chipsMultiplier = 1.5f; // Больше денег можно выиграть
+                        break;
+                }
+                
+                xpGain = Mathf.RoundToInt(baseXp * xpMultiplier);
+                // Применяем множитель к выигрышу фишек (только для отображения, реальный выигрыш уже в chipsGain)
+                int displayedChipsGain = Mathf.RoundToInt(chipsGain * chipsMultiplier);
+                
                 int newBalance = view.core.TokensCount;
                 int newXp = view.core.XP + xpGain;
                 
@@ -991,6 +1075,19 @@ public class GameManager : MonoBehaviour
             Debug.LogError("GameManager: failed to rebuild because references are missing");
             return;
         }
+        
+        // Загружаем настройки блайндов из TableRuntimeConfig, если они есть
+        if (TableRuntimeConfig.HasConfig)
+        {
+            smallBlind = TableRuntimeConfig.SmallBlind;
+            bigBlind = TableRuntimeConfig.BigBlind;
+            Debug.Log($"GameManager: RebuildPlayersAndStart - Используем блайнды из TableRuntimeConfig - Small: {smallBlind}, Big: {bigBlind}");
+        }
+        else
+        {
+            Debug.Log($"GameManager: RebuildPlayersAndStart - TableRuntimeConfig не установлен, используем значения по умолчанию - Small: {smallBlind}, Big: {bigBlind}");
+        }
+        
         InitializeRuntimePlayers();
         SetupController();
         StartNewHand();
@@ -1183,12 +1280,21 @@ public class GameManager : MonoBehaviour
 
     private GameConfig BuildBotConfig(int startingStack)
     {
+        TableDifficulty difficulty = TableRuntimeConfig.Difficulty;
+        int maxRaises = maxRaisesPerRound;
+        
+        // Для легкой сложности ограничиваем количество рейзов
+        if (difficulty == TableDifficulty.Easy)
+        {
+            maxRaises = Math.Min(2, maxRaises); // Максимум 2 рейза за раунд
+        }
+        
         return new GameConfig
         {
             SmallBlindSize = smallBlind,
             BigBlindSize = bigBlind,
             StartingStack = startingStack,
-            MaxNumRaisesPerBettingRound = Math.Max(1, maxRaisesPerRound),
+            MaxNumRaisesPerBettingRound = Math.Max(1, maxRaises),
             MaxHands = 0,
             DoubleBlindFrequency = 0,
             BotTimeOutMilliSeconds = 0,
@@ -1199,8 +1305,27 @@ public class GameManager : MonoBehaviour
 
     private IHoldemPlayer CreateBotInstance(int seatIndex)
     {
-        // чередуем стили ботов для разнообразия
+        TableDifficulty difficulty = TableRuntimeConfig.Difficulty;
+        
+        // Выбираем ботов в зависимости от сложности
+        switch (difficulty)
+        {
+            case TableDifficulty.Easy:
+                // Для легкой сложности используем только EasyBot (тупые боты)
+                return new EasyBot();
+            
+            case TableDifficulty.Medium:
+                // Для средней сложности чередуем BetterBot и RandomBot (как было раньше)
         return seatIndex % 2 == 0 ? new BetterBot() : new RandomBot();
+            
+            case TableDifficulty.Hard:
+                // Для тяжелой сложности используем HardBot (умные боты)
+                // Чередуем HardBot и BetterBot для разнообразия
+                return seatIndex % 2 == 0 ? new HardBot() : new BetterBot();
+            
+            default:
+                return new BetterBot();
+        }
     }
 
     private void SetInitialDealerPosition()

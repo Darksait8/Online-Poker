@@ -3,6 +3,8 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using Photon.Pun;
+using System.Threading.Tasks;
 
 public static class AuthManager
 {
@@ -45,12 +47,82 @@ public static class AuthManager
         {
             EnsureCardThemeApplied(null);
         }
+        
+        // Инициализируем UGS и загружаем профиль из облака (если доступно)
+        InitializeUGSAsync();
+    }
+    
+    /// <summary>
+    /// Асинхронная инициализация UGS и загрузка профиля из облака
+    /// </summary>
+    private static async void InitializeUGSAsync()
+    {
+        try
+        {
+            // Ждем инициализации UGS
+            if (UGSServiceManager.Instance != null)
+            {
+                if (!UGSServiceManager.Instance.IsInitialized)
+                {
+                    await UGSServiceManager.Instance.InitializeAsync();
+                }
+                
+                // Если не авторизован, делаем анонимный вход
+                if (!UGSServiceManager.Instance.IsSignedIn)
+                {
+                    await UGSServiceManager.Instance.SignInAnonymousAsync();
+                }
+                
+                // Загружаем профиль из облака, если он есть
+                if (UGSServiceManager.Instance.IsSignedIn && UGSCloudSaveManager.Instance != null)
+                {
+                    var cloudProfile = await UGSCloudSaveManager.Instance.LoadPlayerProfileAsync();
+                    if (cloudProfile != null && _currentUser != null)
+                    {
+                        // Синхронизируем данные из облака с локальным профилем
+                        SyncProfileFromCloud(cloudProfile);
+                    }
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"Не удалось инициализировать UGS: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Синхронизация профиля из облака с локальным профилем
+    /// </summary>
+    private static void SyncProfileFromCloud(UserProfile cloudProfile)
+    {
+        if (_currentUser == null || cloudProfile == null) return;
+        
+        // Обновляем данные из облака (приоритет облачным данным)
+        _currentUser.chips = cloudProfile.chips;
+        _currentUser.XP = cloudProfile.XP;
+        _currentUser.totalGamesPlayed = cloudProfile.totalGamesPlayed;
+        _currentUser.gamesWon = cloudProfile.gamesWon;
+        _currentUser.gamesLost = cloudProfile.gamesLost;
+        _currentUser.totalWinnings = cloudProfile.totalWinnings;
+        _currentUser.totalLosses = cloudProfile.totalLosses;
+        _currentUser.handsPlayed = cloudProfile.handsPlayed;
+        _currentUser.handsWon = cloudProfile.handsWon;
+        _currentUser.handsLost = cloudProfile.handsLost;
+        
+        SaveCurrentUser();
+        OnUserProfileChanged?.Invoke(_currentUser);
+        
+        Debug.Log("Профиль синхронизирован из облака");
     }
     
     /// <summary>
     /// Попытка входа с именем пользователя и паролем
     /// </summary>
-    public static void Login(string username, string password)
+    /// <summary>
+    /// Вход в систему (через UGS, с fallback на локальные аккаунты для старых пользователей)
+    /// </summary>
+    public static async void Login(string username, string password)
     {
         if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
         {
@@ -58,38 +130,96 @@ public static class AuthManager
             return;
         }
         
-        UserProfile profile = UserDataManager.LoadUserProfile(username);
+        // Нормализуем username
+        string normalizedUsername = username.Trim();
         
-        if (profile == null)
+        Debug.Log($"Попытка входа: {normalizedUsername}");
+        
+        // Сначала пытаемся войти через UGS
+        bool ugsSuccess = false;
+        try
         {
-            OnAuthError?.Invoke("Пользователь не найден");
-            return;
+            await LoginToUGSAsync(normalizedUsername, password);
+            ugsSuccess = _currentUser != null && _currentUser.isLoggedIn;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"Ошибка входа через UGS: {e.Message}");
         }
         
-        if (!UserDataManager.VerifyPassword(password, profile.passwordHash))
+        // Если UGS не сработал, пробуем локальный аккаунт (для старых пользователей)
+        if (!ugsSuccess)
         {
-            OnAuthError?.Invoke("Неверный пароль");
-            return;
+            Debug.Log($"Попытка входа через локальный аккаунт для {normalizedUsername}...");
+            
+            UserProfile profile = UserDataManager.LoadUserProfile(normalizedUsername);
+            
+            if (profile != null && UserDataManager.VerifyPassword(password, profile.passwordHash))
+            {
+                // Локальный аккаунт найден и пароль верный
+                _currentUser = profile;
+                _currentUser.isLoggedIn = true;
+                _currentUser.lastLoginDate = DateTime.Now;
+                _currentUser.StartNewSession();
+                EnsureSocialCollections(_currentUser);
+                EnsureCardThemeApplied(_currentUser.gameSettings);
+                
+                OnUserLoggedIn?.Invoke(_currentUser);
+                OnUserProfileChanged?.Invoke(_currentUser);
+                NotifySocialChanged();
+                
+                Debug.Log($"Вход выполнен через локальный аккаунт для {normalizedUsername}");
+                
+                // Пытаемся мигрировать в UGS (в фоне)
+                MigrateLocalAccountToUGSAsync(normalizedUsername, password);
+            }
+            else
+            {
+                OnAuthError?.Invoke("Неверный логин или пароль");
+            }
         }
-        
-        // Успешный вход
-        _currentUser = profile;
-        _currentUser.isLoggedIn = true;
-        _currentUser.lastLoginDate = DateTime.Now;
-        _currentUser.StartNewSession();
-        EnsureSocialCollections(_currentUser);
-        
-        UserDataManager.SaveUserProfile(_currentUser);
-        EnsureCardThemeApplied(_currentUser.gameSettings);
-        OnUserLoggedIn?.Invoke(_currentUser);
-        OnUserProfileChanged?.Invoke(_currentUser);
-        NotifySocialChanged();
     }
     
     /// <summary>
-    /// Регистрация нового пользователя
+    /// Мигрирует локальный аккаунт в UGS (в фоне)
     /// </summary>
-    public static void Register(string username, string email, string password, string confirmPassword)
+    private static async void MigrateLocalAccountToUGSAsync(string username, string password)
+    {
+        try
+        {
+            if (UGSServiceManager.Instance == null) return;
+            
+            if (!UGSServiceManager.Instance.IsInitialized)
+            {
+                await UGSServiceManager.Instance.InitializeAsync();
+            }
+            
+            if (!UGSServiceManager.Instance.IsInitialized) return;
+            
+            // Пытаемся зарегистрироваться в UGS
+            bool registered = await UGSServiceManager.Instance.RegisterWithUsernamePasswordAsync(username, password);
+            
+            if (registered && _currentUser != null)
+            {
+                // Сохраняем профиль в облако
+                if (UGSCloudSaveManager.Instance != null)
+                {
+                    await UGSCloudSaveManager.Instance.SavePlayerProfileAsync(_currentUser);
+                    Debug.Log($"Локальный аккаунт {username} мигрирован в UGS");
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            // Игнорируем ошибки миграции - пользователь уже залогинен локально
+            Debug.LogWarning($"Не удалось мигрировать аккаунт в UGS: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Регистрация нового пользователя (только через UGS, без локального хранения)
+    /// </summary>
+    public static async void Register(string username, string email, string password, string confirmPassword)
     {
         if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(email) || 
             string.IsNullOrEmpty(password) || string.IsNullOrEmpty(confirmPassword))
@@ -104,78 +234,194 @@ public static class AuthManager
             return;
         }
         
-        if (password.Length < 6)
+        // Нормализуем username
+        string normalizedUsername = username.Trim();
+        
+        // Валидация username по требованиям UGS
+        string usernameError = ValidateUsername(normalizedUsername);
+        if (!string.IsNullOrEmpty(usernameError))
         {
-            OnAuthError?.Invoke("Пароль должен содержать минимум 6 символов");
+            OnAuthError?.Invoke(usernameError);
             return;
         }
         
-        if (UserDataManager.ProfileExists(username))
+        // Валидация пароля по требованиям UGS
+        string passwordError = ValidatePassword(password);
+        if (!string.IsNullOrEmpty(passwordError))
         {
-            OnAuthError?.Invoke("Пользователь с таким именем уже существует");
+            OnAuthError?.Invoke(passwordError);
             return;
         }
         
-        // Создаем нового пользователя
-        _currentUser = new UserProfile
-        {
-            username = username,
-            email = email,
-            passwordHash = UserDataManager.HashPassword(password),
-            registrationDate = DateTime.Now,
-            lastLoginDate = DateTime.Now,
-            isLoggedIn = true
-        };
+        Debug.Log($"Регистрация через UGS: {normalizedUsername}");
         
-        _currentUser.StartNewSession();
-        EnsureSocialCollections(_currentUser);
+        // Регистрируемся только через UGS
+        await RegisterToUGSAsync(normalizedUsername, email, password);
+    }
+    
+    /// <summary>
+    /// Валидация username по требованиям UGS Authentication
+    /// </summary>
+    private static string ValidateUsername(string username)
+    {
+        if (string.IsNullOrEmpty(username))
+            return "Имя пользователя не может быть пустым";
         
-        // Сохраняем профиль
-        if (UserDataManager.SaveUserProfile(_currentUser))
+        // Длина: минимум 3, максимум 20
+        if (username.Length < 3)
+            return "Имя пользователя должно содержать минимум 3 символа";
+        
+        if (username.Length > 20)
+            return "Имя пользователя должно содержать максимум 20 символов";
+        
+        // Разрешенные символы: буквы, цифры, и символы: . - _ @
+        System.Text.RegularExpressions.Regex regex = new System.Text.RegularExpressions.Regex(@"^[a-zA-Z0-9._@-]+$");
+        if (!regex.IsMatch(username))
         {
-            EnsureCardThemeApplied(_currentUser.gameSettings);
-            OnUserLoggedIn?.Invoke(_currentUser);
-            OnUserProfileChanged?.Invoke(_currentUser);
-            NotifySocialChanged();
+            return "Имя пользователя может содержать только буквы, цифры и символы: . - _ @";
         }
-        else
+        
+        return null; // Валидация пройдена
+    }
+    
+    /// <summary>
+    /// Валидация пароля по требованиям UGS Authentication
+    /// </summary>
+    private static string ValidatePassword(string password)
+    {
+        if (string.IsNullOrEmpty(password))
+            return "Пароль не может быть пустым";
+        
+        // Длина: минимум 8, максимум 30
+        if (password.Length < 8)
+            return "Пароль должен содержать минимум 8 символов";
+        
+        if (password.Length > 30)
+            return "Пароль должен содержать максимум 30 символов";
+        
+        // Проверка наличия заглавной буквы
+        bool hasUpper = false;
+        // Проверка наличия строчной буквы
+        bool hasLower = false;
+        // Проверка наличия цифры
+        bool hasDigit = false;
+        // Проверка наличия символа
+        bool hasSymbol = false;
+        
+        foreach (char c in password)
         {
-            OnAuthError?.Invoke("Ошибка сохранения профиля");
+            if (char.IsUpper(c)) hasUpper = true;
+            else if (char.IsLower(c)) hasLower = true;
+            else if (char.IsDigit(c)) hasDigit = true;
+            else hasSymbol = true;
         }
+        
+        if (!hasUpper)
+            return "Пароль должен содержать минимум 1 заглавную букву (A-Z)";
+        
+        if (!hasLower)
+            return "Пароль должен содержать минимум 1 строчную букву (a-z)";
+        
+        if (!hasDigit)
+            return "Пароль должен содержать минимум 1 цифру (0-9)";
+        
+        if (!hasSymbol)
+            return "Пароль должен содержать минимум 1 символ (например: ! @ # $ % и т.д.)";
+        
+        return null; // Валидация пройдена
     }
     
     /// <summary>
     /// Вход как гость
     /// </summary>
-    public static void LoginAsGuest()
+    public static async void LoginAsGuest()
     {
-        _currentUser = new UserProfile
+        // Вход как гость через UGS анонимный вход
+        try
         {
-            username = "Guest_" + DateTime.Now.Ticks,
-            email = "",
-            passwordHash = "",
-            registrationDate = DateTime.Now,
-            lastLoginDate = DateTime.Now,
-            isLoggedIn = true
-        };
-        
-        _currentUser.StartNewSession();
-        EnsureSocialCollections(_currentUser);
-        EnsureCardThemeApplied(_currentUser.gameSettings);
-        OnUserLoggedIn?.Invoke(_currentUser);
-        OnUserProfileChanged?.Invoke(_currentUser);
-        NotifySocialChanged();
+            if (UGSServiceManager.Instance == null)
+            {
+                OnAuthError?.Invoke("Сервис авторизации недоступен. Попробуйте позже.");
+                return;
+            }
+            
+            // Инициализируем UGS, если нужно
+            if (!UGSServiceManager.Instance.IsInitialized)
+            {
+                bool initialized = await UGSServiceManager.Instance.InitializeAsync();
+                if (!initialized)
+                {
+                    OnAuthError?.Invoke("Ошибка инициализации сервиса. Проверьте интернет-соединение.");
+                    return;
+                }
+            }
+            
+            // Входим анонимно
+            bool signedIn = await UGSServiceManager.Instance.SignInAnonymousAsync();
+            if (!signedIn || !UGSServiceManager.Instance.IsSignedIn)
+            {
+                OnAuthError?.Invoke("Ошибка входа как гость");
+                return;
+            }
+            
+            // Загружаем или создаем профиль гостя
+            UserProfile guestProfile = null;
+            if (UGSCloudSaveManager.Instance != null)
+            {
+                guestProfile = await UGSCloudSaveManager.Instance.LoadPlayerProfileAsync();
+            }
+            
+            if (guestProfile == null)
+            {
+                // Создаем новый профиль гостя
+                guestProfile = new UserProfile
+                {
+                    username = "Guest_" + DateTime.Now.Ticks,
+                    email = "",
+                    registrationDate = DateTime.Now,
+                    lastLoginDate = DateTime.Now,
+                    isLoggedIn = true
+                };
+                
+                guestProfile.StartNewSession();
+                EnsureSocialCollections(guestProfile);
+                
+                // Сохраняем в облако
+                if (UGSCloudSaveManager.Instance != null)
+                {
+                    await UGSCloudSaveManager.Instance.SavePlayerProfileAsync(guestProfile);
+                }
+            }
+            
+            _currentUser = guestProfile;
+            EnsureCardThemeApplied(_currentUser.gameSettings);
+            OnUserLoggedIn?.Invoke(_currentUser);
+            OnUserProfileChanged?.Invoke(_currentUser);
+            NotifySocialChanged();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Ошибка входа как гость: {e.Message}");
+            OnAuthError?.Invoke($"Ошибка входа как гость: {e.Message}");
+        }
     }
     
     /// <summary>
     /// Выход из системы
     /// </summary>
-    public static void Logout()
+    public static async void Logout()
     {
         if (_currentUser != null)
         {
             _currentUser.isLoggedIn = false;
-            UserDataManager.SaveUserProfile(_currentUser);
+            // Сохраняем в облако перед выходом
+            await SaveCurrentUserAsync();
+        }
+        
+        // Выходим из UGS
+        if (UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn)
+        {
+            UGSServiceManager.Instance.SignOut();
         }
         
         _currentUser = null;
@@ -188,25 +434,27 @@ public static class AuthManager
     /// <summary>
     /// Загружает текущего пользователя из сохраненных данных
     /// </summary>
-    private static void LoadCurrentUser()
+    private static async void LoadCurrentUser()
     {
-        // Пытаемся загрузить последнего авторизованного пользователя
-        var usernames = UserDataManager.GetAllUsernames();
-        
-        foreach (string username in usernames)
+        // Не загружаем локально - только из облака
+        // Если UGS доступен и пользователь залогинен, загружаем из облака
+        if (UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn && UGSCloudSaveManager.Instance != null)
         {
-            UserProfile profile = UserDataManager.LoadUserProfile(username);
-            if (profile != null && profile.isLoggedIn)
+            try
             {
-                _currentUser = profile;
-                EnsureSocialCollections(_currentUser);
-                break;
+                var cloudProfile = await UGSCloudSaveManager.Instance.LoadPlayerProfileAsync();
+                if (cloudProfile != null)
+                {
+                    _currentUser = cloudProfile;
+                    EnsureSocialCollections(_currentUser);
+                    NotifySocialChanged();
+                    Debug.Log("Профиль загружен из облака при старте");
+                }
             }
-        }
-
-        if (_currentUser != null)
-        {
-            NotifySocialChanged();
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Не удалось загрузить профиль из облака: {e.Message}");
+            }
         }
     }
     
@@ -227,15 +475,37 @@ public static class AuthManager
     }
     
     /// <summary>
-    /// Сохраняет текущего пользователя
+    /// Сохраняет текущего пользователя в облако (UGS Cloud Save)
     /// </summary>
-    public static void SaveCurrentUser()
+    public static async System.Threading.Tasks.Task SaveCurrentUserAsync()
     {
-        if (_currentUser != null)
+        if (_currentUser != null && UGSCloudSaveManager.Instance != null && UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn)
         {
-            UserDataManager.SaveUserProfile(_currentUser);
+            try
+            {
+                await UGSCloudSaveManager.Instance.SavePlayerProfileAsync(_currentUser);
+                Debug.Log("Профиль сохранен в облако");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Ошибка сохранения профиля в облако: {e.Message}");
+            }
         }
     }
+    
+    /// <summary>
+    /// Сохраняет текущего пользователя в облако (синхронная обертка для обратной совместимости)
+    /// </summary>
+#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+    public static void SaveCurrentUser()
+    {
+        // Вызываем async версию в фоне, не блокируя выполнение
+        if (_currentUser != null)
+        {
+            _ = SaveCurrentUserAsync();
+        }
+    }
+#pragma warning restore CS4014
     
     /// <summary>
     /// Обновляет игровую статистику
@@ -246,6 +516,12 @@ public static class AuthManager
         {
             _currentUser.UpdateGameStats(won, chipsWon, chipsLost);
             SaveCurrentUser();
+            
+            // Синхронизируем профиль через Photon, если играем онлайн
+            if (NetworkGameManager.Instance != null)
+            {
+                NetworkGameManager.Instance.UpdatePlayerProfile();
+            }
         }
     }
     
@@ -294,15 +570,65 @@ public static class AuthManager
             
             Debug.Log($"AuthManager: Баланс обновлен {oldBalance} -> {newBalance}");
             
-            // Синхронизируем с сервером, если используется серверная авторизация
-            AuthServerSync authSync = AuthServerSync.EnsureInstance();
-            if (authSync != null && authSync.UseServerAuth)
+            OnUserProfileChanged?.Invoke(_currentUser);
+            
+            // Синхронизируем профиль через Photon, если играем онлайн
+            if (NetworkGameManager.Instance != null)
             {
-                Debug.Log($"AuthManager: Синхронизирую баланс {newBalance} с сервером...");
-                authSync.SyncProfileToServer(_currentUser);
+                NetworkGameManager.Instance.UpdatePlayerProfile();
             }
             
-            OnUserProfileChanged?.Invoke(_currentUser);
+            // Сохраняем в Cloud Save через UGS (если доступно)
+            SaveToCloudSaveAsync();
+            
+            // Обновляем рейтинг в таблице лидеров через UGS (если доступно)
+            UpdateLeaderboardAsync();
+        }
+    }
+    
+    /// <summary>
+    /// Асинхронное сохранение в Cloud Save
+    /// </summary>
+    private static async void SaveToCloudSaveAsync()
+    {
+        if (_currentUser == null) return;
+        
+        try
+        {
+            if (UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn)
+            {
+                if (UGSCloudSaveManager.Instance != null)
+                {
+                    await UGSCloudSaveManager.Instance.SavePlayerProfileAsync(_currentUser);
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"Не удалось сохранить в Cloud Save: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Асинхронное обновление таблицы лидеров
+    /// </summary>
+    private static async void UpdateLeaderboardAsync()
+    {
+        if (_currentUser == null) return;
+        
+        try
+        {
+            if (UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn)
+            {
+                if (UGSLeaderboardManager.Instance != null)
+                {
+                    await UGSLeaderboardManager.Instance.UpdatePlayerRatingFromProfile(_currentUser);
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"Не удалось обновить таблицу лидеров: {e.Message}");
         }
     }
     
@@ -316,6 +642,18 @@ public static class AuthManager
             _currentUser.XP = Mathf.Max(0, _currentUser.XP + xpAmount);
             SaveCurrentUser();
             OnUserProfileChanged?.Invoke(_currentUser);
+            
+            // Синхронизируем профиль через Photon, если играем онлайн
+            if (NetworkGameManager.Instance != null)
+            {
+                NetworkGameManager.Instance.UpdatePlayerProfile();
+            }
+            
+            // Сохраняем в Cloud Save через UGS (если доступно)
+            SaveToCloudSaveAsync();
+            
+            // Обновляем рейтинг в таблице лидеров через UGS (если доступно)
+            UpdateLeaderboardAsync();
         }
     }
     
@@ -472,15 +810,10 @@ public static class AuthManager
 
         string resolvedUsername = ResolveUsernameCaseInsensitive(targetUsername);
         
-        // Если не найден локально, проверяем на сервере
         if (resolvedUsername == null)
         {
-            resolvedUsername = CheckUserExistsOnServer(targetUsername);
-            if (resolvedUsername == null)
-            {
-                error = "Пользователь не найден.";
-                return false;
-            }
+            error = "Пользователь не найден.";
+            return false;
         }
 
         EnsureSocialCollections(_currentUser);
@@ -498,15 +831,10 @@ public static class AuthManager
         // Пытаемся загрузить профиль пользователя
         UserProfile targetProfile = UserDataManager.LoadUserProfile(resolvedUsername);
         
-        // Если не найден локально, пытаемся загрузить с сервера
         if (targetProfile == null)
         {
-            targetProfile = LoadUserProfileFromServer(resolvedUsername);
-            if (targetProfile == null)
-            {
-                error = "Пользователь не найден.";
-                return false;
-            }
+            error = "Пользователь не найден.";
+            return false;
         }
 
         EnsureSocialCollections(targetProfile);
@@ -522,25 +850,17 @@ public static class AuthManager
             return false;
         }
 
-        // Отправляем заявку на сервер, если включена серверная авторизация
-        AuthServerSync authSync = AuthServerSync.Instance;
-        if (authSync != null && authSync.UseServerAuth)
-        {
-            var authClient = authSync.Client;
-            
-            if (authClient != null && authClient.IsConnected())
-            {
-                // Отправляем заявку на сервер
-                authClient.SendFriendRequest(_currentUser.username, resolvedUsername);
-                // Заявка будет сохранена на сервере, локально тоже сохраняем для совместимости
-            }
-        }
-        
         _currentUser.outgoingFriendRequests.Add(CreateRequest(_currentUser.username, resolvedUsername));
         SaveCurrentUser();
 
         targetProfile.incomingFriendRequests.Add(CreateRequest(_currentUser.username, resolvedUsername));
         UserDataManager.SaveUserProfile(targetProfile);
+
+        // Обновляем Custom Properties в Photon если подключены
+        if (PhotonSocialManager.Instance != null && Photon.Pun.PhotonNetwork.IsConnected)
+        {
+            PhotonSocialManager.Instance.UpdatePlayerCustomProperties();
+        }
 
         NotifySocialChanged();
         return true;
@@ -635,6 +955,12 @@ public static class AuthManager
             if (!requesterProfile.friends.Contains(_currentUser.username, StringComparer.OrdinalIgnoreCase))
                 requesterProfile.friends.Add(_currentUser.username);
             UserDataManager.SaveUserProfile(requesterProfile);
+        }
+
+        // Обновляем Custom Properties в Photon если подключены
+        if (PhotonSocialManager.Instance != null && Photon.Pun.PhotonNetwork.IsConnected)
+        {
+            PhotonSocialManager.Instance.UpdatePlayerCustomProperties();
         }
 
         NotifySocialChanged();
@@ -739,78 +1065,6 @@ public static class AuthManager
         var usernames = UserDataManager.GetAllUsernames();
         return usernames.FirstOrDefault(u => string.Equals(u, target, StringComparison.OrdinalIgnoreCase));
     }
-    
-    /// <summary>
-    /// Проверяет существование пользователя на сервере
-    /// </summary>
-    private static string CheckUserExistsOnServer(string targetUsername)
-    {
-        AuthServerSync authSync = AuthServerSync.Instance;
-        if (authSync == null || !authSync.UseServerAuth)
-            return null;
-        
-        var authClient = authSync.Client;
-        
-        if (authClient == null || !authClient.IsConnected())
-            return null;
-        
-        // Возвращаем targetUsername для проверки через GetProfile
-        return targetUsername;
-    }
-    
-    /// <summary>
-    /// Загружает профиль пользователя с сервера
-    /// </summary>
-    private static UserProfile LoadUserProfileFromServer(string username)
-    {
-        AuthServerSync authSync = AuthServerSync.Instance;
-        if (authSync == null || !authSync.UseServerAuth)
-            return null;
-        
-        var authClient = authSync.Client;
-        if (authClient == null || !authClient.IsConnected())
-            return null;
-        
-        // Делаем синхронный запрос (в реальности это должно быть асинхронно)
-        UserProfile profile = null;
-        bool requestCompleted = false;
-        
-        System.Action<bool, Dictionary<string, object>> handler = null;
-        handler = (success, data) =>
-        {
-            authClient.OnProfileResponse -= handler;
-            if (success && data != null)
-            {
-                profile = new UserProfile
-                {
-                    username = data.ContainsKey("username") ? data["username"].ToString() : username,
-                    email = data.ContainsKey("email") ? data["email"].ToString() : "",
-                    passwordHash = "",
-                    registrationDate = DateTime.Parse(data.ContainsKey("registration_date") ? data["registration_date"].ToString() : DateTime.Now.ToString()),
-                    lastLoginDate = DateTime.Now,
-                    isLoggedIn = false,
-                    chips = data.ContainsKey("chips") ? Convert.ToInt32(data["chips"]) : 1000,
-                    XP = data.ContainsKey("xp") ? Convert.ToInt32(data["xp"]) : 0
-                };
-                EnsureSocialCollections(profile);
-            }
-            requestCompleted = true;
-        };
-        
-        authClient.OnProfileResponse += handler;
-        authClient.GetProfile(username);
-        
-        // Ждем ответа (в реальности это должно быть асинхронно через корутину)
-        float timeout = 3f;
-        float elapsed = 0f;
-        while (!requestCompleted && elapsed < timeout)
-        {
-            System.Threading.Thread.Sleep(100);
-            elapsed += 0.1f;
-        }
-        
-        return profile;
-    }
 
     private static void EnsureFriendsList(UserProfile profile)
     {
@@ -865,6 +1119,250 @@ public static class AuthManager
         OnFriendRequestsChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Вход в UGS с логином и паролем
+    /// </summary>
+    private static async System.Threading.Tasks.Task LoginToUGSAsync(string username, string password)
+    {
+        try
+        {
+            if (UGSServiceManager.Instance == null)
+            {
+                OnAuthError?.Invoke("Сервис авторизации недоступен. Попробуйте позже.");
+                return;
+            }
+            
+            // Инициализируем UGS, если нужно
+            if (!UGSServiceManager.Instance.IsInitialized)
+            {
+                Debug.Log("Инициализация UGS...");
+                bool initialized = await UGSServiceManager.Instance.InitializeAsync();
+                if (!initialized)
+                {
+                    OnAuthError?.Invoke("Ошибка инициализации сервиса. Проверьте интернет-соединение.");
+                    return;
+                }
+            }
+            
+            // Если уже залогинен, сначала выходим
+            if (UGSServiceManager.Instance.IsSignedIn)
+            {
+                Debug.Log("Выход из текущей сессии...");
+                UGSServiceManager.Instance.SignOut();
+                await System.Threading.Tasks.Task.Delay(300);
+            }
+            
+            // Входим с логином и паролем
+            Debug.Log($"Вход в UGS для {username}...");
+            bool signedIn = await UGSServiceManager.Instance.SignInWithUsernamePasswordAsync(username, password);
+            
+            if (!signedIn || !UGSServiceManager.Instance.IsSignedIn)
+            {
+                OnAuthError?.Invoke("Неверный логин или пароль");
+                return;
+            }
+            
+            Debug.Log("Успешный вход в UGS! Загружаем профиль из облака...");
+            
+            // Загружаем профиль из облака
+            if (UGSCloudSaveManager.Instance != null)
+            {
+                Debug.Log($"AuthManager: Начинаем загрузку профиля для {username} из Cloud Save...");
+                var cloudProfile = await UGSCloudSaveManager.Instance.LoadPlayerProfileAsync();
+                
+                if (cloudProfile != null && !string.IsNullOrWhiteSpace(cloudProfile.username))
+                {
+                    // Профиль найден в облаке - используем его
+                    Debug.Log($"AuthManager: Профиль найден в облаке для {username}. Чипсы: {cloudProfile.chips}, XP: {cloudProfile.XP}");
+                    _currentUser = cloudProfile;
+                    _currentUser.isLoggedIn = true;
+                    _currentUser.lastLoginDate = DateTime.Now;
+                    _currentUser.StartNewSession();
+                    EnsureSocialCollections(_currentUser);
+                    EnsureCardThemeApplied(_currentUser.gameSettings);
+                    
+                    // Сохраняем в облако (обновляем lastLoginDate)
+                    bool saved = await UGSCloudSaveManager.Instance.SavePlayerProfileAsync(_currentUser);
+                    if (saved)
+                    {
+                        Debug.Log($"AuthManager: Профиль обновлен в облаке для {username}");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"AuthManager: Не удалось обновить профиль в облаке для {username}");
+                    }
+                    
+                    OnUserLoggedIn?.Invoke(_currentUser);
+                    OnUserProfileChanged?.Invoke(_currentUser);
+                    NotifySocialChanged();
+                    
+                    Debug.Log($"AuthManager: Профиль загружен из облака для {username}");
+                }
+                else
+                {
+                    // Профиль не найден - создаем новый
+                    Debug.Log($"AuthManager: Профиль не найден в облаке для {username}, создаем новый...");
+                    _currentUser = new UserProfile
+                    {
+                        username = username,
+                        email = "", // Email будет из UGS, если доступен
+                        registrationDate = DateTime.Now,
+                        lastLoginDate = DateTime.Now,
+                        isLoggedIn = true
+                    };
+                    
+                    _currentUser.StartNewSession();
+                    EnsureSocialCollections(_currentUser);
+                    EnsureCardThemeApplied(_currentUser.gameSettings);
+                    
+                    // Сохраняем новый профиль в облако
+                    bool saved = await UGSCloudSaveManager.Instance.SavePlayerProfileAsync(_currentUser);
+                    if (saved)
+                    {
+                        Debug.Log($"AuthManager: Создан новый профиль в облаке для {username}");
+                    }
+                    else
+                    {
+                        Debug.LogError($"AuthManager: Не удалось сохранить новый профиль в облаке для {username}");
+                    }
+                    
+                    OnUserLoggedIn?.Invoke(_currentUser);
+                    OnUserProfileChanged?.Invoke(_currentUser);
+                    NotifySocialChanged();
+                }
+            }
+            else
+            {
+                Debug.LogError("AuthManager: UGSCloudSaveManager.Instance == null!");
+                OnAuthError?.Invoke("Сервис сохранения недоступен. Попробуйте позже.");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Ошибка входа в UGS: {e.Message}\n{e.StackTrace}");
+            OnAuthError?.Invoke($"Ошибка входа: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Регистрация в UGS с логином и паролем
+    /// </summary>
+    private static async System.Threading.Tasks.Task RegisterToUGSAsync(string username, string email, string password)
+    {
+        try
+        {
+            if (UGSServiceManager.Instance == null)
+            {
+                OnAuthError?.Invoke("Сервис авторизации недоступен. Попробуйте позже.");
+                return;
+            }
+            
+            // Инициализируем UGS, если нужно
+            if (!UGSServiceManager.Instance.IsInitialized)
+            {
+                Debug.Log("Инициализация UGS...");
+                bool initialized = await UGSServiceManager.Instance.InitializeAsync();
+                if (!initialized)
+                {
+                    OnAuthError?.Invoke("Ошибка инициализации сервиса. Проверьте интернет-соединение.");
+                    return;
+                }
+            }
+            
+            // Если уже залогинен, сначала выходим
+            if (UGSServiceManager.Instance.IsSignedIn)
+            {
+                Debug.Log("Выход из текущей сессии...");
+                UGSServiceManager.Instance.SignOut();
+                await System.Threading.Tasks.Task.Delay(500); // Увеличили задержку
+            }
+            
+            // Регистрируемся в UGS
+            Debug.Log($"Регистрация в UGS для {username}...");
+            
+            // Подписываемся на событие ошибки для получения детального сообщения
+            string lastError = null;
+            System.Action<string> errorHandler = (errorMsg) => { lastError = errorMsg; };
+            UGSServiceManager.OnSignInFailed += errorHandler;
+            
+            bool registered = await UGSServiceManager.Instance.RegisterWithUsernamePasswordAsync(username, password);
+            
+            // Отписываемся от события
+            UGSServiceManager.OnSignInFailed -= errorHandler;
+            
+            if (!registered)
+            {
+                // Показываем ошибку пользователю
+                if (!string.IsNullOrEmpty(lastError))
+                {
+                    OnAuthError?.Invoke(lastError);
+                }
+                else
+                {
+                    OnAuthError?.Invoke("Ошибка регистрации. Возможно, пользователь с таким именем уже существует.");
+                }
+                return;
+            }
+            
+            if (!UGSServiceManager.Instance.IsSignedIn)
+            {
+                OnAuthError?.Invoke("Ошибка регистрации. Не удалось войти после регистрации.");
+                return;
+            }
+            
+            Debug.Log("Успешная регистрация в UGS! Создаем профиль в облаке...");
+            
+            // Создаем новый профиль
+            _currentUser = new UserProfile
+            {
+                username = username,
+                email = email,
+                registrationDate = DateTime.Now,
+                lastLoginDate = DateTime.Now,
+                isLoggedIn = true
+            };
+            
+            _currentUser.StartNewSession();
+            EnsureSocialCollections(_currentUser);
+            EnsureCardThemeApplied(_currentUser.gameSettings);
+            
+            // Сохраняем профиль в облако
+            if (UGSCloudSaveManager.Instance != null)
+            {
+                await UGSCloudSaveManager.Instance.SavePlayerProfileAsync(_currentUser);
+                
+                // Обновляем рейтинг в таблице лидеров
+                if (UGSLeaderboardManager.Instance != null)
+                {
+                    await UGSLeaderboardManager.Instance.UpdatePlayerRatingFromProfile(_currentUser);
+                }
+            }
+            
+            OnUserLoggedIn?.Invoke(_currentUser);
+            OnUserProfileChanged?.Invoke(_currentUser);
+            NotifySocialChanged();
+            
+            Debug.Log($"Профиль создан в облаке для {username}");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Ошибка регистрации в UGS: {e.GetType().Name}: {e.Message}\n{e.StackTrace}");
+            
+            // Более понятное сообщение об ошибке
+            string errorMessage = e.Message;
+            if (e.Message.Contains("already exists") || e.Message.Contains("already registered"))
+            {
+                errorMessage = "Пользователь с таким именем уже существует в системе";
+            }
+            else if (e.Message.Contains("Invalid state"))
+            {
+                errorMessage = "Ошибка состояния. Попробуйте позже или перезапустите игру.";
+            }
+            
+            OnAuthError?.Invoke($"Ошибка регистрации: {errorMessage}");
+        }
+    }
+    
     private static void EnsureCardThemeApplied(GameSettings settings)
     {
         string themeId = settings?.cardThemeId;

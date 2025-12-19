@@ -19,6 +19,10 @@ public class PauseMenuController : MonoBehaviour
     [SerializeField] private Slider masterVolumeSlider;       // громкость
     [SerializeField] private Button backFromSettingsButton;   // назад из настроек
 
+    [Header("Приглашение друзей")]
+    [SerializeField] private Button inviteFriendsButton;      // кнопка "Пригласить друзей"
+    [SerializeField] private InviteFriendsPanel inviteFriendsPanel; // панель приглашения друзей
+
     [Header("Яркость (оверлей)")]
     [SerializeField] private Image brightnessOverlay;         // полноэкранный Image поверх сцены
     [SerializeField] private Slider brightnessSlider;         // ползунок яркости (0..1)
@@ -40,6 +44,7 @@ public class PauseMenuController : MonoBehaviour
 
         if (resumeButton != null) resumeButton.onClick.AddListener(Resume);
         if (settingsButton != null) settingsButton.onClick.AddListener(ShowSettings);
+        if (inviteFriendsButton != null) inviteFriendsButton.onClick.AddListener(ShowInviteFriends);
         if (mainMenuButton != null) mainMenuButton.onClick.AddListener(LoadMainMenu);
         if (exitButton != null) exitButton.onClick.AddListener(ExitGame);
         if (backFromSettingsButton != null) backFromSettingsButton.onClick.AddListener(HideSettings);
@@ -77,6 +82,7 @@ public class PauseMenuController : MonoBehaviour
     {
         if (resumeButton != null) resumeButton.onClick.RemoveListener(Resume);
         if (settingsButton != null) settingsButton.onClick.RemoveListener(ShowSettings);
+        if (inviteFriendsButton != null) inviteFriendsButton.onClick.RemoveListener(ShowInviteFriends);
         if (mainMenuButton != null) mainMenuButton.onClick.RemoveListener(LoadMainMenu);
         if (exitButton != null) exitButton.onClick.RemoveListener(ExitGame);
         if (backFromSettingsButton != null) backFromSettingsButton.onClick.RemoveListener(HideSettings);
@@ -99,6 +105,7 @@ public class PauseMenuController : MonoBehaviour
         if (pausePanel != null) pausePanel.SetActive(true);
         if (pauseContent != null) pauseContent.SetActive(true);
         if (settingsPanel != null) settingsPanel.SetActive(false);
+        if (inviteFriendsPanel != null) inviteFriendsPanel.ClosePanel();
     }
 
     public void Resume()
@@ -107,18 +114,39 @@ public class PauseMenuController : MonoBehaviour
         Time.timeScale = 1f;
         if (pausePanel != null) pausePanel.SetActive(false);
         if (settingsPanel != null) settingsPanel.SetActive(false);
+        if (inviteFriendsPanel != null) inviteFriendsPanel.ClosePanel();
     }
 
     private void ShowSettings()
     {
         if (settingsPanel != null) settingsPanel.SetActive(true);
         if (pauseContent != null) pauseContent.SetActive(false);
+        if (inviteFriendsPanel != null) inviteFriendsPanel.ClosePanel();
     }
 
     private void HideSettings()
     {
         if (settingsPanel != null) settingsPanel.SetActive(false);
         if (pauseContent != null) pauseContent.SetActive(true);
+    }
+
+    private void ShowInviteFriends()
+    {
+        if (inviteFriendsPanel != null)
+        {
+            inviteFriendsPanel.ShowPanel();
+            if (pauseContent != null) pauseContent.SetActive(false);
+            if (settingsPanel != null) settingsPanel.SetActive(false);
+        }
+    }
+
+    public void HideInviteFriends()
+    {
+        if (inviteFriendsPanel != null)
+        {
+            inviteFriendsPanel.ClosePanel();
+            if (pauseContent != null) pauseContent.SetActive(true);
+        }
     }
 
     private void LoadMainMenu()

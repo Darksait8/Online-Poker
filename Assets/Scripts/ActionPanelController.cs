@@ -21,7 +21,6 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
     [Header("Совместимость")]
     [SerializeField] private GameStateMachine legacyStateMachine;
     [SerializeField] private GameManager gameManager;
-    [SerializeField] private NetworkGameManager networkGameManager;
 
     private bool panelEnabled = false;
     private DecisionRequest activeRequest;
@@ -50,9 +49,6 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
 
         if (gameManager == null)
             gameManager = FindObjectOfType<GameManager>();
-        
-        if (networkGameManager == null)
-            networkGameManager = FindObjectOfType<NetworkGameManager>();
 
         if (gameManager != null)
             gameManager.OnPhaseChanged += HandlePhaseChanged;
@@ -185,6 +181,7 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
 
     private void SetPanelEnabled(bool enabled)
     {
+        if (this == null) return;
         panelEnabled = enabled;
         gameObject.SetActive(enabled);
     }
@@ -200,12 +197,6 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
             return;
         }
 
-        // Отправляем действие на сервер, если онлайн-режим активен
-        if (networkGameManager != null && networkGameManager.IsOnlineModeActive())
-        {
-            networkGameManager.OnPlayerFold();
-        }
-
         CompleteDecision(new PlayerDecision(PlayerDecisionType.Fold));
     }
 
@@ -213,19 +204,6 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
     {
         if (!panelEnabled || pendingDecision == null || activeRequest == null)
             return;
-
-        // Отправляем действие на сервер, если онлайн-режим активен
-        if (networkGameManager != null && networkGameManager.IsOnlineModeActive())
-        {
-            if (callAmount <= 0)
-            {
-                networkGameManager.OnPlayerCheck();
-            }
-            else
-            {
-                networkGameManager.OnPlayerCall();
-            }
-        }
 
         if (callAmount <= 0)
         {
@@ -245,12 +223,6 @@ public class ActionPanelController : MonoBehaviour, IPlayerDecisionProvider
         int totalBet = Mathf.RoundToInt(betSlider.value);
         bool willAllIn = maxTotalBet > 0 && totalBet >= maxTotalBet;
         int raiseAmount = Math.Max(0, totalBet - callAmount);
-
-        // Отправляем действие на сервер, если онлайн-режим активен
-        if (networkGameManager != null && networkGameManager.IsOnlineModeActive())
-        {
-            networkGameManager.OnPlayerRaise(totalBet);
-        }
 
         if (willAllIn || availableTokens <= raiseAmount)
         {

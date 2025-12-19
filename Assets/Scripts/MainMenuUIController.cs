@@ -23,8 +23,9 @@ public class MainMenuUIController : MonoBehaviour
     [SerializeField] private Button closeSettingsButton;
     [SerializeField] private Slider volumeSlider;
     [SerializeField] private Slider brightnessSlider;
-    [SerializeField] private Dropdown languageDropdown;
-    [SerializeField] private Dropdown cardThemeDropdown;
+    [SerializeField] private Button languageRussianButton;
+    [SerializeField] private Button languageEnglishButton;
+    [SerializeField] private Button[] cardThemeButtons; // Кнопки для каждой темы
     [SerializeField] private Image cardThemePreview;
     [SerializeField] private Button applySettingsButton;
 
@@ -50,7 +51,6 @@ public class MainMenuUIController : MonoBehaviour
     
     [Header("Обновление баланса")]
     [SerializeField] private bool updateUsersBalanceOnStart = false; // Отключено - не сбрасываем баланс при запуске
-    [SerializeField] private int newDefaultBalance = 1000;
     [SerializeField] private bool resetWeeklyLimitsOnStart = false;
 
     [Header("Информация о фишках")]
@@ -99,9 +99,6 @@ public class MainMenuUIController : MonoBehaviour
 
     private void Awake()
     {
-        // Убеждаемся, что AuthServerSync существует в сцене
-        EnsureAuthServerSync();
-        
         // Обновляем баланс всех пользователей при первом запуске (только если UI элементы привязаны)
         if (updateUsersBalanceOnStart && HasRequiredUIElements())
         {
@@ -126,8 +123,11 @@ public class MainMenuUIController : MonoBehaviour
             saveUserSettingsButton.onClick.AddListener(SaveUserSettings);
         if (cancelUserSettingsButton != null)
             cancelUserSettingsButton.onClick.AddListener(CloseUserSettingsPanel);
-        if (cardThemeDropdown != null)
-            cardThemeDropdown.onValueChanged.AddListener(OnCardThemeChanged);
+        // Подключаем кнопки выбора языка
+        if (languageRussianButton != null)
+            languageRussianButton.onClick.AddListener(() => OnLanguageButtonClicked(AppLanguage.Russian));
+        if (languageEnglishButton != null)
+            languageEnglishButton.onClick.AddListener(() => OnLanguageButtonClicked(AppLanguage.English));
         if (changeAvatarButton != null)
             changeAvatarButton.onClick.AddListener(OnChangeAvatarClicked);
         if (resetAvatarButton != null)
@@ -194,8 +194,8 @@ public class MainMenuUIController : MonoBehaviour
         EnsureRulesPanel();
         LoadSettingsFromProfile();
         RefreshUserInfo();
-        SetupLanguageDropdown();
-        SetupCardThemes();
+        SetupLanguageButtons();
+        SetupCardThemeButtons();
         ApplyProfileAvatarToPreview(AuthManager.CurrentUser);
         UpdateChipLegendDisplay();
         friendsListController?.RefreshList();
@@ -250,17 +250,10 @@ public class MainMenuUIController : MonoBehaviour
         if (leaderboardPanel == null || !leaderboardPanel.gameObject.activeSelf)
             return;
         
-        AuthServerSync authSync = AuthServerSync.Instance;
-        if (authSync != null && authSync.UseServerAuth)
-        {
-            Debug.Log("MainMenuUIController: Обновляю таблицу лидеров с сервера...");
-            LoadLeaderboardFromServer(authSync);
-        }
-        else
         {
             Debug.Log("MainMenuUIController: Обновляю таблицу лидеров из локальных данных...");
             BuildLeaderboardSections(out var topBalance, out var topLevel);
-            leaderboardPanel.Show(topBalance, topLevel);
+            leaderboardPanel.Show(topBalance); // Показываем только по балансу
         }
     }
 
@@ -302,23 +295,17 @@ public class MainMenuUIController : MonoBehaviour
         if (brightnessSlider != null)
             brightnessSlider.value = cachedSettings.brightness;
 
-        if (languageDropdown != null)
-        {
-            int value = (int)cachedSettings.language;
-            if (value >= 0 && value < languageDropdown.options.Count)
-                languageDropdown.value = value;
-            DropdownStyler.Apply(languageDropdown);
-            languageDropdown.RefreshShownValue();
-        }
+        // Обновляем выделение кнопок языка
+        UpdateLanguageButtonsHighlight(cachedSettings.language);
 
-        if (cardThemeDropdown != null && themeOptions.Count > 0)
+        // Обновляем выделение кнопок темы
+        if (themeOptions.Count > 0)
         {
             string id = cachedSettings.cardThemeId;
             int index = themeOptions.FindIndex(t => t.Id == id);
             if (index < 0) index = 0;
-            cardThemeDropdown.SetValueWithoutNotify(index);
-            DropdownStyler.Apply(cardThemeDropdown);
-            cardThemeDropdown.RefreshShownValue();
+            selectedThemeIndex = index;
+            UpdateCardThemeButtonsHighlight();
             UpdateCardThemePreview();
         }
     }
@@ -388,43 +375,95 @@ public class MainMenuUIController : MonoBehaviour
         UpdateUserStatsDisplay(profile);
     }
 
-    private void SetupLanguageDropdown()
+    private void SetupLanguageButtons()
     {
-        if (languageDropdown == null)
-            return;
-
-        if (languageDropdown.options.Count == 0)
-        {
-            languageDropdown.options.Add(new Dropdown.OptionData("Русский"));
-            languageDropdown.options.Add(new Dropdown.OptionData("English"));
-        }
-
-        DropdownStyler.Apply(languageDropdown);
-        languageDropdown.RefreshShownValue();
+        // Кнопки языка настраиваются в Awake через AddListener
+        // Здесь просто обновляем выделение
+        if (cachedSettings != null)
+            UpdateLanguageButtonsHighlight(cachedSettings.language);
     }
 
-    private void SetupCardThemes()
+    private void SetupCardThemeButtons()
     {
-        if (cardThemeDropdown == null)
-            return;
-
         themeOptions = new List<CardThemeInfo>(CardThemeService.Themes);
-        cardThemeDropdown.options.Clear();
-
-        if (themeOptions.Count == 0)
+        
+        if (cardThemeButtons != null)
         {
-            cardThemeDropdown.options.Add(new Dropdown.OptionData("Нет тем"));
-            cardThemeDropdown.interactable = false;
-            return;
+            for (int i = 0; i < cardThemeButtons.Length; i++)
+            {
+                if (cardThemeButtons[i] != null && i < themeOptions.Count)
+                {
+                    int index = i; // Захват для лямбды
+                    cardThemeButtons[i].onClick.RemoveAllListeners();
+                    cardThemeButtons[i].onClick.AddListener(() => OnCardThemeButtonClicked(index));
+                    
+                    // Устанавливаем текст кнопки
+                    Text btnText = cardThemeButtons[i].GetComponentInChildren<Text>();
+                    if (btnText != null)
+                        btnText.text = themeOptions[i].DisplayName;
+                }
+            }
         }
-
-        foreach (CardThemeInfo theme in themeOptions)
-        {
-            cardThemeDropdown.options.Add(new Dropdown.OptionData(theme.DisplayName));
-        }
-        cardThemeDropdown.interactable = true;
-        DropdownStyler.Apply(cardThemeDropdown);
+        
         LoadSettingsFromProfile();
+    }
+
+    private void OnLanguageButtonClicked(AppLanguage language)
+    {
+        if (cachedSettings == null)
+            cachedSettings = new GameSettings();
+        cachedSettings.language = language;
+        UpdateLanguageButtonsHighlight(language);
+    }
+
+    private void UpdateLanguageButtonsHighlight(AppLanguage language)
+    {
+        Color selectedColor = new Color(0.2f, 0.6f, 0.2f, 1f); // Зелёный для выбранного
+        Color normalColor = new Color(0.3f, 0.3f, 0.3f, 1f); // Серый для невыбранного
+        
+        if (languageRussianButton != null)
+        {
+            var colors = languageRussianButton.colors;
+            colors.normalColor = language == AppLanguage.Russian ? selectedColor : normalColor;
+            languageRussianButton.colors = colors;
+        }
+        if (languageEnglishButton != null)
+        {
+            var colors = languageEnglishButton.colors;
+            colors.normalColor = language == AppLanguage.English ? selectedColor : normalColor;
+            languageEnglishButton.colors = colors;
+        }
+    }
+
+    private int selectedThemeIndex = 0;
+
+    private void OnCardThemeButtonClicked(int index)
+    {
+        if (index >= 0 && index < themeOptions.Count)
+        {
+            selectedThemeIndex = index;
+            UpdateCardThemeButtonsHighlight();
+            UpdateCardThemePreview();
+        }
+    }
+
+    private void UpdateCardThemeButtonsHighlight()
+    {
+        Color selectedColor = new Color(0.2f, 0.6f, 0.2f, 1f);
+        Color normalColor = new Color(0.3f, 0.3f, 0.3f, 1f);
+        
+        if (cardThemeButtons != null)
+        {
+            for (int i = 0; i < cardThemeButtons.Length; i++)
+            {
+                if (cardThemeButtons[i] != null)
+                {
+                    var colors = cardThemeButtons[i].colors;
+                    colors.normalColor = (i == selectedThemeIndex) ? selectedColor : normalColor;
+                    cardThemeButtons[i].colors = colors;
+                }
+            }
+        }
     }
 
 
@@ -571,20 +610,14 @@ public class MainMenuUIController : MonoBehaviour
         if (brightnessSlider != null)
             cachedSettings.brightness = brightnessSlider.value;
 
-        if (languageDropdown != null)
-        {
-            cachedSettings.language = (AppLanguage)Mathf.Clamp(languageDropdown.value, 0, 1);
-            LocalizationManager.CurrentLanguage = cachedSettings.language;
-        }
+        // Язык уже сохранён в cachedSettings через OnLanguageButtonClicked
+        LocalizationManager.CurrentLanguage = cachedSettings.language;
 
-        if (cardThemeDropdown != null && themeOptions.Count > 0)
+        // Тема уже выбрана через кнопки
+        if (themeOptions.Count > 0 && selectedThemeIndex >= 0 && selectedThemeIndex < themeOptions.Count)
         {
-            int index = Mathf.Clamp(cardThemeDropdown.value, 0, themeOptions.Count - 1);
-            cachedSettings.cardThemeId = themeOptions[index].Id;
+            cachedSettings.cardThemeId = themeOptions[selectedThemeIndex].Id;
         }
-
-        DropdownStyler.Apply(cardThemeDropdown);
-        DropdownStyler.Apply(languageDropdown);
 
         if (AuthManager.IsLoggedIn)
         {
@@ -610,9 +643,8 @@ public class MainMenuUIController : MonoBehaviour
         if (cardThemePreview == null || themeOptions.Count == 0)
             return;
 
-        int index = Mathf.Clamp(cardThemeDropdown.value, 0, themeOptions.Count - 1);
+        int index = Mathf.Clamp(selectedThemeIndex, 0, themeOptions.Count - 1);
         cardThemePreview.sprite = themeOptions[index].Preview;
-        DropdownStyler.Apply(cardThemeDropdown);
     }
 
     private void OnVolumePreviewChanged(float value)
@@ -1471,28 +1503,45 @@ public class MainMenuUIController : MonoBehaviour
         topBalance = new List<LeaderboardEntry>();
         topLevel = new List<LeaderboardEntry>();
         
-        // Пытаемся загрузить данные со сервера
-        AuthServerSync authSync = AuthServerSync.Instance;
-        if (authSync != null && authSync.UseServerAuth)
+        var current = AuthManager.CurrentUser;
+        
+        // Собираем профили: текущий пользователь + локальные (если есть)
+        var profiles = new List<UserProfile>();
+        
+        // Добавляем текущего пользователя, если он залогинен
+        if (current != null && !string.IsNullOrWhiteSpace(current.username))
         {
-            Debug.Log("MainMenuUIController: Используется серверная авторизация, загружаю данные со сервера...");
-            // Загружаем данные со сервера асинхронно
-            // Возвращаем пустые списки, они обновятся когда данные загрузятся
-            LoadLeaderboardFromServer(authSync);
-            return;
+            profiles.Add(current);
+            Debug.Log($"MainMenuUIController: Добавлен текущий пользователь: {current.username} (чипсы: {current.chips})");
         }
         
-        Debug.Log("MainMenuUIController: Используются локальные данные (серверная авторизация не включена)");
-        
-        // Fallback на локальные данные
-        var profiles = AuthManager.GetAllProfilesSnapshot() ?? new List<UserProfile>();
-        var current = AuthManager.CurrentUser;
+        // Пытаемся загрузить локальные профили (для обратной совместимости)
+        try
+        {
+            var localProfiles = AuthManager.GetAllProfilesSnapshot() ?? new List<UserProfile>();
+            foreach (var profile in localProfiles)
+            {
+                // Добавляем только если это не текущий пользователь (чтобы избежать дубликатов)
+                if (profile != null && !string.IsNullOrWhiteSpace(profile.username))
+                {
+                    if (current == null || !string.Equals(profile.username, current.username, StringComparison.OrdinalIgnoreCase))
+                    {
+                        profiles.Add(profile);
+                    }
+                }
+            }
+            Debug.Log($"MainMenuUIController: Добавлено локальных профилей: {localProfiles.Count}");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"MainMenuUIController: Не удалось загрузить локальные профили: {e.Message}");
+        }
 
-        Debug.Log($"MainMenuUIController: Загружено локальных профилей для таблицы лидеров: {profiles.Count}");
+        Debug.Log($"MainMenuUIController: Всего профилей для таблицы лидеров: {profiles.Count}");
 
         // Убираем дубликаты по username (берем последний профиль для каждого username)
         var uniqueProfiles = profiles
-            .Where(p => !string.IsNullOrWhiteSpace(p?.username))
+            .Where(p => p != null && !string.IsNullOrWhiteSpace(p.username))
             .GroupBy(p => p.username, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderByDescending(p => p.lastLoginDate).First())
             .ToList();
@@ -1522,117 +1571,8 @@ public class MainMenuUIController : MonoBehaviour
             .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
             .Take(10)
             .ToList();
-    }
-    
-    private void LoadLeaderboardFromServer(AuthServerSync authSync)
-    {
-        var authClient = authSync?.Client ?? authSync?.GetComponent<AuthServerClient>();
         
-        if (authClient == null)
-        {
-            Debug.LogWarning("MainMenuUIController: AuthServerClient не найден, используем локальные данные");
-            BuildLeaderboardSectionsFromLocal();
-            return;
-        }
-        
-        // Подписываемся на ответ
-        System.Action<bool, List<Dictionary<string, object>>> handler = null;
-        handler = (success, usersList) =>
-        {
-            authClient.OnAllUsersResponse -= handler;
-            
-            if (success && usersList != null && usersList.Count > 0)
-            {
-                var current = AuthManager.CurrentUser;
-                var entries = usersList.Select(userData => new LeaderboardEntry
-                {
-                    username = userData.ContainsKey("username") ? userData["username"].ToString() : "Игрок",
-                    level = userData.ContainsKey("level") ? Convert.ToInt32(userData["level"]) : 1,
-                    chips = userData.ContainsKey("chips") ? Convert.ToInt32(userData["chips"]) : 0,
-                    xp = userData.ContainsKey("xp") ? Convert.ToInt32(userData["xp"]) : 0,
-                    isCurrentUser = current != null && userData.ContainsKey("username") && 
-                                   string.Equals(userData["username"].ToString(), current.username, StringComparison.OrdinalIgnoreCase)
-                }).ToList();
-                
-                var topBalanceList = entries
-                    .OrderByDescending(e => e.chips)
-                    .ThenByDescending(e => e.level)
-                    .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
-                    .Take(10)
-                    .ToList();
-                
-                var topLevelList = entries
-                    .OrderByDescending(e => e.level)
-                    .ThenByDescending(e => e.xp)
-                    .ThenByDescending(e => e.chips)
-                    .ThenBy(e => e.username, StringComparer.OrdinalIgnoreCase)
-                    .Take(10)
-                    .ToList();
-                
-                Debug.Log($"MainMenuUIController: Загружено {usersList.Count} пользователей со сервера. Top balance: {topBalanceList.Count}, Top level: {topLevelList.Count}");
-                
-                // Обновляем панель лидеров
-                if (leaderboardPanel != null)
-                {
-                    leaderboardPanel.Show(topBalanceList, topLevelList);
-                    Debug.Log("MainMenuUIController: Панель лидеров обновлена");
-                }
-                else
-                {
-                    Debug.LogError("MainMenuUIController: leaderboardPanel is null!");
-                }
-            }
-            else
-            {
-                Debug.LogWarning($"MainMenuUIController: Не удалось загрузить пользователей со сервера (success: {success}, count: {usersList?.Count ?? 0}), используем локальные данные");
-                BuildLeaderboardSectionsFromLocal();
-            }
-        };
-        
-        Debug.Log("MainMenuUIController: Начинаю загрузку таблицы лидеров со сервера...");
-        
-        // Проверяем подключение
-        if (!authClient.IsConnected())
-        {
-            Debug.LogWarning("MainMenuUIController: AuthServerClient не подключен, пытаемся подключиться...");
-            authClient.Connect();
-            // Ждем немного для подключения
-            StartCoroutine(WaitAndLoadLeaderboard(authClient));
-            return;
-        }
-        
-        Debug.Log("MainMenuUIController: AuthServerClient подключен, запрашиваю список пользователей...");
-        
-        authClient.OnAllUsersResponse += handler;
-        authClient.GetAllUsers();
-        Debug.Log("MainMenuUIController: Запрос GetAllUsers отправлен");
-    }
-    
-    private IEnumerator WaitAndLoadLeaderboard(AuthServerClient authClient)
-    {
-        float timeout = 5f;
-        float elapsed = 0f;
-        
-        while (!authClient.IsConnected() && elapsed < timeout)
-        {
-            yield return new WaitForSeconds(0.1f);
-            elapsed += 0.1f;
-        }
-        
-        if (authClient.IsConnected())
-        {
-            Debug.Log("MainMenuUIController: Подключение установлено, загружаю таблицу лидеров...");
-            AuthServerSync authSync = AuthServerSync.Instance;
-            if (authSync != null)
-            {
-                LoadLeaderboardFromServer(authSync);
-            }
-        }
-        else
-        {
-            Debug.LogWarning("MainMenuUIController: Не удалось подключиться к серверу, используем локальные данные");
-            BuildLeaderboardSectionsFromLocal();
-        }
+        Debug.Log($"MainMenuUIController: Топ по балансу: {topBalance.Count} записей");
     }
     
     private void BuildLeaderboardSectionsFromLocal()
@@ -1676,11 +1616,6 @@ public class MainMenuUIController : MonoBehaviour
         }
     }
 
-    private void EnsureAuthServerSync()
-    {
-        AuthServerSync.EnsureInstance();
-    }
-    
     private void EnsureLeaderboardPanel()
     {
         if (leaderboardPanel == null)

@@ -7,7 +7,6 @@ using System.Collections.Generic;
 public class UserBalanceUpdater : MonoBehaviour
 {
     [Header("Настройки обновления")]
-    [SerializeField] private int newDefaultBalance = 1000;
     [SerializeField] private bool updateOnStart = false;
     
     private void Start()

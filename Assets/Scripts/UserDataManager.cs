@@ -86,7 +86,8 @@ public static class UserDataManager
         }
         catch (Exception e)
         {
-            Debug.LogError($"Failed to save profile {profile.username}: {e.Message}");
+            string profileName = profile?.username ?? "null";
+            Debug.LogError($"Failed to save profile {profileName}: {e.Message}");
             OnDataError?.Invoke($"Ошибка сохранения профиля: {e.Message}");
             return false;
         }
@@ -105,6 +106,9 @@ public static class UserDataManager
                 return null;
             }
             
+            // Нормализуем username (убираем пробелы)
+            username = username.Trim();
+            
             // Убеждаемся, что папки существуют
             CreateDirectories();
             
@@ -112,8 +116,27 @@ public static class UserDataManager
             
             if (!File.Exists(profilePath))
             {
-                Debug.LogWarning($"Profile not found: {username}");
-                return null;
+                // Пробуем найти файл без учета регистра (для Windows)
+                if (Directory.Exists(ProfilesPath))
+                {
+                    string[] files = Directory.GetFiles(ProfilesPath, "*.json");
+                    foreach (string file in files)
+                    {
+                        string fileName = Path.GetFileNameWithoutExtension(file);
+                        if (string.Equals(fileName, username, StringComparison.OrdinalIgnoreCase))
+                        {
+                            profilePath = file;
+                            Debug.Log($"Найден профиль без учета регистра: {fileName} -> {username}");
+                            break;
+                        }
+                    }
+                }
+                
+                if (!File.Exists(profilePath))
+                {
+                    Debug.LogWarning($"Profile not found: {username} (путь: {profilePath})");
+                    return null;
+                }
             }
             
             string json = File.ReadAllText(profilePath);

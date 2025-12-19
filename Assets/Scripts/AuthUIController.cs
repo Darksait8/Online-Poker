@@ -35,18 +35,9 @@ public class AuthUIController : MonoBehaviour
     [SerializeField] private float loadingDelay = 1f;
 
     private bool isAuthenticating;
-    private AuthServerSync authServerSync;
     
     private void Awake()
     {
-        // Находим или создаем AuthServerSync
-        authServerSync = FindObjectOfType<AuthServerSync>();
-        if (authServerSync == null)
-        {
-            GameObject syncObj = new GameObject("AuthServerSync");
-            authServerSync = syncObj.AddComponent<AuthServerSync>();
-        }
-        
         // Подписываемся на события авторизации
         AuthManager.OnUserLoggedIn += OnUserLoggedIn;
         AuthManager.OnUserLoggedOut += OnUserLoggedOut;
@@ -107,26 +98,8 @@ public class AuthUIController : MonoBehaviour
         ClearMessages();
         BeginAuthOperation();
         
-        // Используем серверную авторизацию, если доступна
-        if (authServerSync != null)
-        {
-            authServerSync.LoginOnServer(username, password, (success, message) =>
-            {
-                if (success)
-                {
-                    // Успешный вход обрабатывается через события AuthManager
-                }
-                else
-                {
-                    OnAuthError(message);
-                }
-            });
-        }
-        else
-        {
-            // Fallback на локальную авторизацию
-            AuthManager.Login(username, password);
-        }
+        // Используем локальную авторизацию
+        AuthManager.Login(username, password);
     }
     
     private void OnLoginAsGuestClicked()
@@ -148,26 +121,8 @@ public class AuthUIController : MonoBehaviour
         ClearMessages();
         BeginAuthOperation();
         
-        // Используем серверную авторизацию, если доступна
-        if (authServerSync != null)
-        {
-            authServerSync.RegisterOnServer(username, email, password, confirmPassword, (success, message) =>
-            {
-                if (success)
-                {
-                    // Успешная регистрация обрабатывается через события AuthManager
-                }
-                else
-                {
-                    OnAuthError(message);
-                }
-            });
-        }
-        else
-        {
-            // Fallback на локальную авторизацию
-            AuthManager.Register(username, email, password, confirmPassword);
-        }
+        // Используем локальную авторизацию
+        AuthManager.Register(username, email, password, confirmPassword);
     }
     
     private void OnUserLoggedIn(UserProfile user)

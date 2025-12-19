@@ -24,9 +24,6 @@ public class MainMenuSettingsController : MonoBehaviour
     [SerializeField] private Image brightnessOverlay; // полноэкранный Image поверх меню
     [SerializeField] private Slider brightnessSlider;  // 0..1
 
-    [Header("Язык (Dropdown)")]
-    [SerializeField] private Dropdown languageDropdown; // Options: 0=Русский, 1=English
-    
     [Header("Кнопка выхода")]
     [SerializeField] private Button logoutButton;
 
@@ -57,15 +54,6 @@ public class MainMenuSettingsController : MonoBehaviour
             brightnessSlider.onValueChanged.AddListener(OnBrightnessChanged);
         }
 
-        // Language
-        if (languageDropdown != null)
-        {
-            languageDropdown.ClearOptions();
-            languageDropdown.AddOptions(new System.Collections.Generic.List<string> { "Русский", "English" });
-            languageDropdown.value = (int)LocalizationManager.CurrentLanguage;
-            languageDropdown.onValueChanged.AddListener(OnLanguageChanged);
-        }
-        
         // Logout button
         if (logoutButton != null)
         {
@@ -77,7 +65,6 @@ public class MainMenuSettingsController : MonoBehaviour
     {
         if (volumeSlider != null) volumeSlider.onValueChanged.RemoveListener(OnVolumeChanged);
         if (brightnessSlider != null) brightnessSlider.onValueChanged.RemoveListener(OnBrightnessChanged);
-        if (languageDropdown != null) languageDropdown.onValueChanged.RemoveListener(OnLanguageChanged);
         if (logoutButton != null) logoutButton.onClick.RemoveListener(OnLogoutClicked);
     }
 
@@ -100,19 +87,6 @@ public class MainMenuSettingsController : MonoBehaviour
         var c = brightnessOverlay.color; c.a = alpha; brightnessOverlay.color = c;
     }
 
-    private void OnLanguageChanged(int idx)
-    {
-        var lang = (AppLanguage)Mathf.Clamp(idx, 0, 1);
-        LocalizationManager.CurrentLanguage = lang;
-
-        if (languageDropdown != null && languageDropdown.options.Count >= 2)
-        {
-            languageDropdown.options[0].text = lang == AppLanguage.Russian ? "Русский" : "Russian";
-            languageDropdown.options[1].text = lang == AppLanguage.Russian ? "English" : "English";
-            languageDropdown.RefreshShownValue();
-        }
-    }
-    
     private void OnLogoutClicked()
     {
         AuthManager.Logout();

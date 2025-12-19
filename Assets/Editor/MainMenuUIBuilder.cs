@@ -22,7 +22,7 @@ public class MainMenuUIBuilder : EditorWindow
         }
 
         GUILayout.Space(10);
-        EditorGUILayout.HelpBox("Команда пересоздаёт Canvas и полностью настраивает рабочее меню: \n- кнопки 'Присоединиться', 'Создать стол', 'Настройки', 'Таблица лидеров', 'Правила', 'Назад'\n- панель создания стола с вводом блайнда и выбором мест\n- компонент MenuPlayLauncher с привязанными ссылками.", MessageType.Info);
+        EditorGUILayout.HelpBox("Команда пересоздаёт Canvas и полностью настраивает рабочее меню: \n- кнопки 'Создать стол', 'Настройки', 'Таблица лидеров', 'Правила', 'Вернуться к регистрации', 'Выйти из игры'\n- панель создания стола с вводом блайнда, выбором мест и сложности ботов\n- компонент MenuPlayLauncher с привязанными ссылками.", MessageType.Info);
     }
 
     private static void CreateMainMenuUI()
@@ -65,12 +65,12 @@ public class MainMenuUIBuilder : EditorWindow
         ContentSizeFitter primaryFitter = primaryPanel.AddComponent<ContentSizeFitter>();
         primaryFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        Button joinButton = CreateButton("JoinDefaultButton", primaryPanel.transform, "присоединиться к столу");
         Button openCreateButton = CreateButton("OpenCreatePanelButton", primaryPanel.transform, "создать стол");
         Button settingsButton = CreateButton("SettingsButton", primaryPanel.transform, "настройки");
         Button leaderboardButton = CreateButton("LeaderboardButton", primaryPanel.transform, "таблица лидеров");
         Button rulesButton = CreateButton("RulesButton", primaryPanel.transform, "правила");
-        Button backButton = CreateButton("BackButton", primaryPanel.transform, "назад");
+        Button backButton = CreateButton("BackButton", primaryPanel.transform, "вернуться к регистрации");
+        Button exitButton = CreateButton("ExitButton", primaryPanel.transform, "выйти из игры");
 
         // Панель создания стола
         GameObject createPanel = new GameObject("CreateTablePanel", typeof(Image));
@@ -94,11 +94,163 @@ public class MainMenuUIBuilder : EditorWindow
         createFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
         CreateText("CreateTitle", createPanel.transform, "настройки стола", 26);
-        InputField blindInput = CreateInputField("BigBlindInput", createPanel.transform, "введите начальный блайнд", "2000");
-        Dropdown seatsDropdown = CreateDropdown("MaxSeatsDropdown", createPanel.transform, "выберите количество мест", 2, 9);
+        
+        // Метка для поля малого блайнда
+        Text blindLabel = CreateText("BigBlindLabel", createPanel.transform, "малый блайнд (ставка до раздачи карт):", 18);
+        blindLabel.alignment = TextAnchor.MiddleLeft;
+        blindLabel.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+        RectTransform blindLabelRect = blindLabel.GetComponent<RectTransform>();
+        blindLabelRect.sizeDelta = new Vector2(360, 30);
+        
+        InputField blindInput = CreateInputField("BigBlindInput", createPanel.transform, "введите малый блайнд (например: 10)", "10");
+        
+        // Слайдер количества мест
+        Slider maxSeatsSlider;
+        Text maxSeatsValueText;
+        CreateSeatsSliderControl(createPanel.transform, out maxSeatsSlider, out maxSeatsValueText);
+        
+        // Кнопки выбора сложности
+        Button difficultyEasyButton, difficultyMediumButton, difficultyHardButton;
+        CreateDifficultyButtons(createPanel.transform, out difficultyEasyButton, out difficultyMediumButton, out difficultyHardButton);
+        
+        Toggle isPrivateToggle = CreateToggle("IsPrivateToggle", createPanel.transform, "закрытый стол (требуется пароль или приглашение)");
+        InputField passwordInput = CreateTextInputField("PasswordInput", createPanel.transform, "пароль (необязательно, если пусто - доступ только по приглашению)", "");
+        passwordInput.contentType = InputField.ContentType.Password;
         Button createPlayButton = CreateButton("CreateAndPlayButton", createPanel.transform, "создать и играть");
         Button cancelButton = CreateButton("CancelCreateButton", createPanel.transform, "назад");
         createPanel.SetActive(false);
+
+        // Панель списка столов
+        GameObject tableListPanel = new GameObject("TableListPanel", typeof(Image));
+        Undo.RegisterCreatedObjectUndo(tableListPanel, "Create TableListPanel");
+        tableListPanel.transform.SetParent(root.transform, false);
+        Image tableListImage = tableListPanel.GetComponent<Image>();
+        tableListImage.color = new Color(1f, 1f, 1f, 0.95f);
+        RectTransform tableListRect = tableListPanel.GetComponent<RectTransform>();
+        tableListRect.anchorMin = new Vector2(0.5f, 0.5f);
+        tableListRect.anchorMax = new Vector2(0.5f, 0.5f);
+        tableListRect.sizeDelta = new Vector2(600, 500);
+        tableListRect.anchoredPosition = Vector2.zero;
+
+        VerticalLayoutGroup tableListLayout = tableListPanel.AddComponent<VerticalLayoutGroup>();
+        tableListLayout.spacing = 16f;
+        tableListLayout.padding = new RectOffset(40, 40, 40, 40);
+        tableListLayout.childAlignment = TextAnchor.MiddleCenter;
+
+        CreateText("TableListTitle", tableListPanel.transform, "выберите стол", 26);
+
+        // Кнопка обновления
+        Button refreshButton = CreateButton("RefreshTableListButton", tableListPanel.transform, "обновить");
+
+        // Заголовок для инвайтов
+        CreateText("InvitesTitle", tableListPanel.transform, "приглашения к столу", 20);
+
+        // Контейнер для инвайтов
+        GameObject invitesScrollGO = new GameObject("InvitesScrollView", typeof(Image), typeof(ScrollRect));
+        Undo.RegisterCreatedObjectUndo(invitesScrollGO, "Create Invites Scroll");
+        invitesScrollGO.transform.SetParent(tableListPanel.transform, false);
+        Image invitesScrollImage = invitesScrollGO.GetComponent<Image>();
+        invitesScrollImage.color = new Color(0f, 0f, 0f, 0.25f);
+        RectTransform invitesScrollRect = invitesScrollGO.GetComponent<RectTransform>();
+        invitesScrollRect.sizeDelta = new Vector2(0f, 150f);
+
+        GameObject invitesViewport = new GameObject("Viewport", typeof(RectMask2D), typeof(Image));
+        Undo.RegisterCreatedObjectUndo(invitesViewport, "Create Invites Viewport");
+        invitesViewport.transform.SetParent(invitesScrollGO.transform, false);
+        Image invitesViewportImage = invitesViewport.GetComponent<Image>();
+        invitesViewportImage.color = new Color(0f, 0f, 0f, 0.15f);
+        RectTransform invitesViewportRect = invitesViewport.GetComponent<RectTransform>();
+        invitesViewportRect.anchorMin = Vector2.zero;
+        invitesViewportRect.anchorMax = Vector2.one;
+        invitesViewportRect.offsetMin = Vector2.zero;
+        invitesViewportRect.offsetMax = Vector2.zero;
+
+        GameObject invitesContent = new GameObject("InvitesContent", typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+        Undo.RegisterCreatedObjectUndo(invitesContent, "Create Invites Content");
+        invitesContent.transform.SetParent(invitesViewport.transform, false);
+        VerticalLayoutGroup invitesLayout = invitesContent.GetComponent<VerticalLayoutGroup>();
+        invitesLayout.spacing = 10f;
+        invitesLayout.padding = new RectOffset(12, 12, 12, 12);
+        invitesLayout.childAlignment = TextAnchor.UpperLeft;
+        invitesLayout.childControlHeight = true;
+        invitesLayout.childControlWidth = true;
+        ContentSizeFitter invitesFitter = invitesContent.GetComponent<ContentSizeFitter>();
+        invitesFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        invitesFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        RectTransform invitesContentRect = invitesContent.GetComponent<RectTransform>();
+        invitesContentRect.anchorMin = new Vector2(0f, 1f);
+        invitesContentRect.anchorMax = new Vector2(1f, 1f);
+        invitesContentRect.pivot = new Vector2(0.5f, 1f);
+        invitesContentRect.sizeDelta = new Vector2(0f, 0f);
+
+        ScrollRect invitesScroll = invitesScrollGO.GetComponent<ScrollRect>();
+        invitesScroll.viewport = invitesViewportRect;
+        invitesScroll.content = invitesContentRect;
+        invitesScroll.horizontal = false;
+
+        // ScrollView для списка столов
+        GameObject scrollGO = new GameObject("TableScrollView", typeof(Image), typeof(ScrollRect));
+        Undo.RegisterCreatedObjectUndo(scrollGO, "Create Table Scroll");
+        scrollGO.transform.SetParent(tableListPanel.transform, false);
+        Image scrollImage = scrollGO.GetComponent<Image>();
+        scrollImage.color = new Color(0f, 0f, 0f, 0.25f);
+        RectTransform scrollRect = scrollGO.GetComponent<RectTransform>();
+        scrollRect.sizeDelta = new Vector2(0f, 300f);
+
+        GameObject viewport = new GameObject("Viewport", typeof(RectMask2D), typeof(Image));
+        Undo.RegisterCreatedObjectUndo(viewport, "Create Table Viewport");
+        viewport.transform.SetParent(scrollGO.transform, false);
+        Image viewportImage = viewport.GetComponent<Image>();
+        viewportImage.color = new Color(0f, 0f, 0f, 0.15f);
+        RectTransform viewportRect = viewport.GetComponent<RectTransform>();
+        viewportRect.anchorMin = Vector2.zero;
+        viewportRect.anchorMax = Vector2.one;
+        viewportRect.offsetMin = Vector2.zero;
+        viewportRect.offsetMax = Vector2.zero;
+
+        GameObject itemsRootGO = new GameObject("TableItems", typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+        Undo.RegisterCreatedObjectUndo(itemsRootGO, "Create Table Items");
+        itemsRootGO.transform.SetParent(viewport.transform, false);
+        VerticalLayoutGroup itemsLayout = itemsRootGO.GetComponent<VerticalLayoutGroup>();
+        itemsLayout.spacing = 10f;
+        itemsLayout.padding = new RectOffset(12, 12, 12, 12);
+        itemsLayout.childAlignment = TextAnchor.UpperLeft;
+        itemsLayout.childControlHeight = true;
+        itemsLayout.childControlWidth = true;
+        ContentSizeFitter itemsFitter = itemsRootGO.GetComponent<ContentSizeFitter>();
+        itemsFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        itemsFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        RectTransform itemsRect = itemsRootGO.GetComponent<RectTransform>();
+        itemsRect.anchorMin = new Vector2(0f, 1f);
+        itemsRect.anchorMax = new Vector2(1f, 1f);
+        itemsRect.pivot = new Vector2(0.5f, 1f);
+        itemsRect.sizeDelta = new Vector2(0f, 0f);
+
+        ScrollRect scrollComponent = scrollGO.GetComponent<ScrollRect>();
+        scrollComponent.viewport = viewportRect;
+        scrollComponent.content = itemsRect;
+        scrollComponent.horizontal = false;
+
+        // Кнопка назад
+        Button tableListBackButton = CreateButton("TableListBackButton", tableListPanel.transform, "назад");
+        tableListPanel.SetActive(false);
+
+        // Привязка TableListController
+        TableListController tableListController = root.GetComponent<TableListController>();
+        if (tableListController == null)
+        {
+            tableListController = root.AddComponent<TableListController>();
+        }
+
+        SerializedObject tableListSO = new SerializedObject(tableListController);
+        tableListSO.FindProperty("tableListPanel").objectReferenceValue = tableListPanel;
+        tableListSO.FindProperty("tableListContainer").objectReferenceValue = itemsRootGO.transform;
+        tableListSO.FindProperty("backButton").objectReferenceValue = tableListBackButton;
+        tableListSO.FindProperty("refreshButton").objectReferenceValue = refreshButton;
+        tableListSO.FindProperty("invitesContainer").objectReferenceValue = invitesContent.transform;
+        tableListSO.FindProperty("primaryButtons").objectReferenceValue = primaryPanel;
+        tableListSO.FindProperty("menuBackground").objectReferenceValue = menuBackground;
+        tableListSO.ApplyModifiedProperties();
 
         // Привязка MenuPlayLauncher
         MenuPlayLauncher launcher = root.GetComponent<MenuPlayLauncher>();
@@ -108,15 +260,23 @@ public class MainMenuUIBuilder : EditorWindow
         }
 
         SerializedObject so = new SerializedObject(launcher);
-        so.FindProperty("joinDefaultTableButton").objectReferenceValue = joinButton;
         so.FindProperty("openCreateTableButton").objectReferenceValue = openCreateButton;
         so.FindProperty("createPanel").objectReferenceValue = createPanel;
         so.FindProperty("bigBlindInput").objectReferenceValue = blindInput;
-        so.FindProperty("maxSeatsDropdown").objectReferenceValue = seatsDropdown;
+        so.FindProperty("maxSeatsSlider").objectReferenceValue = maxSeatsSlider;
+        so.FindProperty("maxSeatsValueText").objectReferenceValue = maxSeatsValueText;
+        so.FindProperty("difficultyEasyButton").objectReferenceValue = difficultyEasyButton;
+        so.FindProperty("difficultyMediumButton").objectReferenceValue = difficultyMediumButton;
+        so.FindProperty("difficultyHardButton").objectReferenceValue = difficultyHardButton;
+        so.FindProperty("isPrivateToggle").objectReferenceValue = isPrivateToggle;
+        so.FindProperty("passwordInput").objectReferenceValue = passwordInput;
         so.FindProperty("createAndPlayButton").objectReferenceValue = createPlayButton;
         so.FindProperty("cancelCreateButton").objectReferenceValue = cancelButton;
         so.FindProperty("primaryButtons").objectReferenceValue = primaryPanel;
         so.FindProperty("menuBackground").objectReferenceValue = menuBackground;
+        so.FindProperty("backToAuthButton").objectReferenceValue = backButton;
+        so.FindProperty("exitGameButton").objectReferenceValue = exitButton;
+        so.FindProperty("tableListController").objectReferenceValue = tableListController;
         so.FindProperty("gameSceneName").stringValue = "Main";
         so.ApplyModifiedProperties();
 
@@ -139,8 +299,9 @@ public class MainMenuUIBuilder : EditorWindow
         GameObject settingsPanel = CreateSettingsPanel(root.transform,
             out Slider volumeSlider,
             out Slider brightnessSlider,
-            out Dropdown languageDropdown,
-            out Dropdown cardThemeDropdown,
+            out Button languageRussianButton,
+            out Button languageEnglishButton,
+            out Button[] cardThemeButtons,
             out Image cardPreviewImage,
             out Button applySettingsButton,
             out Button closeSettingsButton);
@@ -167,8 +328,12 @@ public class MainMenuUIBuilder : EditorWindow
         controllerSO.FindProperty("closeSettingsButton").objectReferenceValue = closeSettingsButton;
         controllerSO.FindProperty("volumeSlider").objectReferenceValue = volumeSlider;
         controllerSO.FindProperty("brightnessSlider").objectReferenceValue = brightnessSlider;
-        controllerSO.FindProperty("languageDropdown").objectReferenceValue = languageDropdown;
-        controllerSO.FindProperty("cardThemeDropdown").objectReferenceValue = cardThemeDropdown;
+        controllerSO.FindProperty("languageRussianButton").objectReferenceValue = languageRussianButton;
+        controllerSO.FindProperty("languageEnglishButton").objectReferenceValue = languageEnglishButton;
+        var themeButtonsProp = controllerSO.FindProperty("cardThemeButtons");
+        themeButtonsProp.arraySize = cardThemeButtons.Length;
+        for (int i = 0; i < cardThemeButtons.Length; i++)
+            themeButtonsProp.GetArrayElementAtIndex(i).objectReferenceValue = cardThemeButtons[i];
         controllerSO.FindProperty("cardThemePreview").objectReferenceValue = cardPreviewImage;
         controllerSO.FindProperty("applySettingsButton").objectReferenceValue = applySettingsButton;
         controllerSO.FindProperty("userAvatarImage").objectReferenceValue = headerAvatar;
@@ -207,7 +372,6 @@ public class MainMenuUIBuilder : EditorWindow
         settingsSO.FindProperty("volumeSlider").objectReferenceValue = volumeSlider;
         settingsSO.FindProperty("brightnessSlider").objectReferenceValue = brightnessSlider;
         settingsSO.FindProperty("brightnessOverlay").objectReferenceValue = brightnessOverlay;
-        settingsSO.FindProperty("languageDropdown").objectReferenceValue = languageDropdown;
         settingsSO.ApplyModifiedProperties();
 
         // Локализация
@@ -219,11 +383,11 @@ public class MainMenuUIBuilder : EditorWindow
 
         SerializedObject locSO = new SerializedObject(localization);
         SerializedProperty entriesProp = locSO.FindProperty("entries");
-        entriesProp.arraySize = 34;
-        SetLocalizationEntry(entriesProp, 0, "JoinDefaultButton", "присоединиться к столу", "Join table");
+        entriesProp.arraySize = 35; // Увеличиваем размер массива для нового элемента
         SetLocalizationEntry(entriesProp, 1, "OpenCreatePanelButton", "создать стол", "Create table");
         SetLocalizationEntry(entriesProp, 2, "SettingsButton", "настройки", "Settings");
-        SetLocalizationEntry(entriesProp, 3, "BackButton", "назад", "Back");
+        SetLocalizationEntry(entriesProp, 3, "BackButton", "вернуться к регистрации", "Back to registration");
+        SetLocalizationEntry(entriesProp, 34, "ExitButton", "выйти из игры", "Exit game");
         SetLocalizationEntry(entriesProp, 4, "CreateTitle", "настройки стола", "Table settings");
         SetLocalizationEntry(entriesProp, 5, "CreateAndPlayButton", "создать и играть", "Create & play");
         SetLocalizationEntry(entriesProp, 6, "CancelCreateButton", "назад", "Back");
@@ -256,9 +420,9 @@ public class MainMenuUIBuilder : EditorWindow
         SetLocalizationEntry(entriesProp, 33, "RulesButton", "правила", "Rules");
         locSO.ApplyModifiedProperties();
  
-        // Назначаем "назад" на главной панели, чтобы закрывать игру (можно повесить выход в будущее)
-        backButton.onClick.RemoveAllListeners();
-        backButton.onClick.AddListener(() => Debug.Log("Назад: повесьте сюда нужное действие"));
+        // Назначаем обработчики для кнопок
+        // Кнопка "вернуться к регистрации" будет обработана через EnsureBackButtonHook в MenuPlayLauncher
+        // Кнопка "выйти из игры" будет обработана через exitGameButton в MenuPlayLauncher
 
         // Гарантируем наличие SceneTransitionManager
         EnsureSceneTransitionManager();
@@ -423,7 +587,7 @@ public class MainMenuUIBuilder : EditorWindow
 
     private static Dropdown CreateDropdown(string name, Transform parent, string label, int minValue, int maxValue)
     {
-        Dropdown dropdown = CreateDropdownBase(name, parent, label);
+        Dropdown dropdown = CreateDropdownBase(name, parent, label, Color.black);
         dropdown.options.Clear();
         for (int i = minValue; i <= maxValue; i++)
         {
@@ -434,17 +598,19 @@ public class MainMenuUIBuilder : EditorWindow
         return dropdown;
     }
 
-    private static Dropdown CreateDropdownContainer(string name, Transform parent, string label)
+    private static Dropdown CreateDropdownContainer(string name, Transform parent, string label, Color? textColor = null)
     {
-        Dropdown dropdown = CreateDropdownBase(name, parent, label);
+        Dropdown dropdown = CreateDropdownBase(name, parent, label, textColor);
         dropdown.options.Clear();
         dropdown.captionText.text = "";
         dropdown.RefreshShownValue();
         return dropdown;
     }
 
-    private static Dropdown CreateDropdownBase(string name, Transform parent, string label)
+    private static Dropdown CreateDropdownBase(string name, Transform parent, string label, Color? textColor = null)
     {
+        Color textColorValue = textColor ?? Color.black; // По умолчанию черный для белого фона
+        
         GameObject container = new GameObject(name);
         Undo.RegisterCreatedObjectUndo(container, "Create " + name);
         container.transform.SetParent(parent, false);
@@ -456,7 +622,7 @@ public class MainMenuUIBuilder : EditorWindow
 
         Text labelText = CreateText("Label", container.transform, label, 20);
         labelText.alignment = TextAnchor.MiddleCenter;
-        labelText.color = Color.white;
+        labelText.color = textColorValue;
         RectTransform labelRect = labelText.GetComponent<RectTransform>();
         labelRect.anchorMin = new Vector2(0.5f, 1f);
         labelRect.anchorMax = new Vector2(0.5f, 1f);
@@ -477,13 +643,20 @@ public class MainMenuUIBuilder : EditorWindow
         dropRect.sizeDelta = new Vector2(360f, 52f);
         dropRect.anchoredPosition = new Vector2(0f, -42f);
 
+        // Устанавливаем белый фон для dropdown
+        Image dropdownImage = dropdownGO.GetComponent<Image>();
+        if (dropdownImage != null)
+        {
+            dropdownImage.color = Color.white;
+        }
+
         Dropdown dropdown = dropdownGO.GetComponent<Dropdown>();
 
         if (dropdown.captionText != null)
         {
             dropdown.captionText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             dropdown.captionText.fontSize = 20;
-            dropdown.captionText.color = Color.white;
+            dropdown.captionText.color = textColorValue;
             dropdown.captionText.alignment = TextAnchor.MiddleLeft;
             RectTransform captionRect = dropdown.captionText.rectTransform;
             captionRect.offsetMin = new Vector2(15f, 0f);
@@ -499,6 +672,24 @@ public class MainMenuUIBuilder : EditorWindow
             templateRect.anchorMin = new Vector2(0f, 0f);
             templateRect.anchorMax = new Vector2(1f, 0f);
             templateRect.sizeDelta = new Vector2(0f, 160f);
+            
+            // Устанавливаем белый фон для template (списка dropdown)
+            Image templateImage = templateRect.GetComponent<Image>();
+            if (templateImage != null)
+            {
+                templateImage.color = Color.white;
+            }
+            
+            // Устанавливаем белый фон для Viewport
+            Transform viewport = templateRect.Find("Viewport");
+            if (viewport != null)
+            {
+                Image viewportImage = viewport.GetComponent<Image>();
+                if (viewportImage != null)
+                {
+                    viewportImage.color = Color.white;
+                }
+            }
 
             Transform itemTransform = templateRect.Find("Viewport/Content/Item");
             if (itemTransform != null)
@@ -508,6 +699,7 @@ public class MainMenuUIBuilder : EditorWindow
                 {
                     itemLabel.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
                     itemLabel.fontSize = 20;
+                    // Для элементов списка всегда черный текст на белом фоне
                     itemLabel.color = Color.black;
                     itemLabel.alignment = TextAnchor.MiddleLeft;
                 }
@@ -526,7 +718,7 @@ public class MainMenuUIBuilder : EditorWindow
             }
         }
 
-        DropdownStyler.Apply(dropdown);
+        DropdownStyler.Apply(dropdown, textColorValue);
 
         return dropdown;
     }
@@ -544,7 +736,7 @@ public class MainMenuUIBuilder : EditorWindow
 
         Text labelText = CreateText("Label", container.transform, label, 20);
         labelText.alignment = TextAnchor.MiddleCenter;
-        labelText.color = Color.white;
+        labelText.color = Color.black;
         RectTransform labelRect = labelText.GetComponent<RectTransform>();
         labelRect.anchorMin = new Vector2(0.5f, 1f);
         labelRect.anchorMax = new Vector2(0.5f, 1f);
@@ -671,6 +863,63 @@ public class MainMenuUIBuilder : EditorWindow
         textRect.offsetMax = new Vector2(-15, 0);
 
         return input;
+    }
+
+    private static Toggle CreateToggle(string name, Transform parent, string label)
+    {
+        GameObject container = new GameObject(name);
+        Undo.RegisterCreatedObjectUndo(container, "Create " + name);
+        container.transform.SetParent(parent, false);
+        RectTransform containerRect = container.AddComponent<RectTransform>();
+        containerRect.sizeDelta = new Vector2(400f, 40f);
+
+        HorizontalLayoutGroup layout = container.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 10f;
+        layout.childControlWidth = false;
+        layout.childControlHeight = true;
+        layout.childForceExpandHeight = true;
+
+        // Toggle
+        GameObject toggleGO = new GameObject("Toggle", typeof(Image), typeof(Toggle));
+        Undo.RegisterCreatedObjectUndo(toggleGO, "Create toggle for " + name);
+        toggleGO.transform.SetParent(container.transform, false);
+        Image toggleBg = toggleGO.GetComponent<Image>();
+        toggleBg.color = new Color(0.2f, 0.2f, 0.2f, 1f);
+        RectTransform toggleRect = toggleGO.GetComponent<RectTransform>();
+        toggleRect.sizeDelta = new Vector2(40f, 40f);
+
+        Toggle toggle = toggleGO.GetComponent<Toggle>();
+        toggle.isOn = false;
+
+        // Checkmark
+        GameObject checkmarkGO = new GameObject("Checkmark", typeof(Image));
+        Undo.RegisterCreatedObjectUndo(checkmarkGO, "Create checkmark for " + name);
+        checkmarkGO.transform.SetParent(toggleGO.transform, false);
+        Image checkmark = checkmarkGO.GetComponent<Image>();
+        checkmark.color = new Color(0.2f, 0.8f, 0.2f, 1f);
+        RectTransform checkmarkRect = checkmarkGO.GetComponent<RectTransform>();
+        checkmarkRect.anchorMin = new Vector2(0.2f, 0.2f);
+        checkmarkRect.anchorMax = new Vector2(0.8f, 0.8f);
+        checkmarkRect.sizeDelta = Vector2.zero;
+        checkmarkRect.anchoredPosition = Vector2.zero;
+
+        toggle.graphic = checkmark;
+        toggle.targetGraphic = toggleBg;
+
+        // Label
+        GameObject labelGO = new GameObject("Label", typeof(Text));
+        Undo.RegisterCreatedObjectUndo(labelGO, "Create label for " + name);
+        labelGO.transform.SetParent(container.transform, false);
+        Text labelText = labelGO.GetComponent<Text>();
+        labelText.text = label;
+        labelText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        labelText.fontSize = 18;
+        labelText.color = Color.black;
+        labelText.alignment = TextAnchor.MiddleLeft;
+        RectTransform labelRect = labelGO.GetComponent<RectTransform>();
+        labelRect.sizeDelta = new Vector2(340f, 40f);
+
+        return toggle;
     }
 
     private static Image CreatePreviewImage(string name, Transform parent, Vector2 size)
@@ -1275,8 +1524,9 @@ private static GameObject CreateUserHeader(Transform parent, out Image avatarIma
     private static GameObject CreateSettingsPanel(Transform parent,
         out Slider volumeSlider,
         out Slider brightnessSlider,
-        out Dropdown languageDropdown,
-        out Dropdown cardThemeDropdown,
+        out Button languageRussianButton,
+        out Button languageEnglishButton,
+        out Button[] cardThemeButtons,
         out Image cardPreview,
         out Button applyButton,
         out Button closeButton)
@@ -1291,7 +1541,6 @@ private static GameObject CreateUserHeader(Transform parent, out Image avatarIma
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
-        // Текущие настройки из сцены: anchoredPosition (10, -70.655396), sizeDelta (766.627, 773.7628)
         rect.anchoredPosition = new Vector2(10f, -70.655396f);
         rect.sizeDelta = new Vector2(766.627f, 773.7628f);
 
@@ -1314,20 +1563,22 @@ private static GameObject CreateUserHeader(Transform parent, out Image avatarIma
         titleRect.sizeDelta = new Vector2(360f, 40f);
 
         volumeSlider = CreateSliderControl("MasterVolumeSlider", contentGO.transform, "громкость");
+        Text volumeLabel = volumeSlider.transform.parent.Find("Label")?.GetComponent<Text>();
+        if (volumeLabel != null) volumeLabel.color = Color.white;
         RectTransform volumeRect = volumeSlider.transform.parent.GetComponent<RectTransform>();
         volumeRect.anchoredPosition = new Vector2(0f, -80f);
 
         brightnessSlider = CreateSliderControl("BrightnessSlider", contentGO.transform, "яркость");
+        Text brightnessLabel = brightnessSlider.transform.parent.Find("Label")?.GetComponent<Text>();
+        if (brightnessLabel != null) brightnessLabel.color = Color.white;
         RectTransform brightnessRect = brightnessSlider.transform.parent.GetComponent<RectTransform>();
         brightnessRect.anchoredPosition = new Vector2(0f, -175f);
 
-        languageDropdown = CreateDropdownContainer("LanguageDropdown", contentGO.transform, "язык");
-        RectTransform languageRect = languageDropdown.transform.parent.GetComponent<RectTransform>();
-        languageRect.anchoredPosition = new Vector2(-120f, -270f);
+        // Кнопки выбора языка
+        CreateLanguageButtonsControl(contentGO.transform, out languageRussianButton, out languageEnglishButton);
 
-        cardThemeDropdown = CreateDropdownContainer("CardThemeDropdown", contentGO.transform, "оформление карт");
-        RectTransform themeRect = cardThemeDropdown.transform.parent.GetComponent<RectTransform>();
-        themeRect.anchoredPosition = new Vector2(-120f, -370f);
+        // Кнопки выбора темы карт
+        CreateCardThemeButtonsControl(contentGO.transform, out cardThemeButtons);
 
         cardPreview = CreatePreviewImage("CardThemePreview", contentGO.transform, new Vector2(180f, 220f));
         RectTransform previewRect = cardPreview.GetComponent<RectTransform>();
@@ -1356,6 +1607,246 @@ private static GameObject CreateUserHeader(Transform parent, out Image avatarIma
         return panel;
     }
 
+    private static void CreateSeatsSliderControl(Transform parent, out Slider slider, out Text valueText)
+    {
+        GameObject container = new GameObject("MaxSeatsSliderContainer");
+        Undo.RegisterCreatedObjectUndo(container, "Create Seats Slider Container");
+        container.transform.SetParent(parent, false);
+        RectTransform containerRect = container.AddComponent<RectTransform>();
+        containerRect.sizeDelta = new Vector2(360f, 60f);
+
+        Text label = CreateText("Label", container.transform, "количество игроков:", 18);
+        label.alignment = TextAnchor.MiddleLeft;
+        label.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+        RectTransform labelRect = label.GetComponent<RectTransform>();
+        labelRect.anchorMin = new Vector2(0f, 1f);
+        labelRect.anchorMax = new Vector2(1f, 1f);
+        labelRect.pivot = new Vector2(0.5f, 1f);
+        labelRect.anchoredPosition = new Vector2(0f, 0f);
+        labelRect.sizeDelta = new Vector2(0f, 25f);
+
+        GameObject sliderGO = new GameObject("MaxSeatsSlider", typeof(Slider));
+        Undo.RegisterCreatedObjectUndo(sliderGO, "Create Seats Slider");
+        sliderGO.transform.SetParent(container.transform, false);
+        slider = sliderGO.GetComponent<Slider>();
+        slider.minValue = 2;
+        slider.maxValue = 9;
+        slider.wholeNumbers = true;
+        slider.value = 6;
+
+        RectTransform sliderRect = sliderGO.GetComponent<RectTransform>();
+        sliderRect.anchorMin = new Vector2(0f, 0f);
+        sliderRect.anchorMax = new Vector2(0.7f, 0.5f);
+        sliderRect.offsetMin = Vector2.zero;
+        sliderRect.offsetMax = Vector2.zero;
+
+        // Создаём элементы слайдера
+        GameObject bgGO = new GameObject("Background", typeof(Image));
+        bgGO.transform.SetParent(sliderGO.transform, false);
+        Image bgImage = bgGO.GetComponent<Image>();
+        bgImage.color = new Color(0.7f, 0.7f, 0.7f, 1f);
+        RectTransform bgRect = bgGO.GetComponent<RectTransform>();
+        bgRect.anchorMin = new Vector2(0f, 0.25f);
+        bgRect.anchorMax = new Vector2(1f, 0.75f);
+        bgRect.offsetMin = Vector2.zero;
+        bgRect.offsetMax = Vector2.zero;
+
+        GameObject fillAreaGO = new GameObject("Fill Area");
+        fillAreaGO.transform.SetParent(sliderGO.transform, false);
+        RectTransform fillAreaRect = fillAreaGO.AddComponent<RectTransform>();
+        fillAreaRect.anchorMin = new Vector2(0f, 0.25f);
+        fillAreaRect.anchorMax = new Vector2(1f, 0.75f);
+        fillAreaRect.offsetMin = new Vector2(5f, 0f);
+        fillAreaRect.offsetMax = new Vector2(-5f, 0f);
+
+        GameObject fillGO = new GameObject("Fill", typeof(Image));
+        fillGO.transform.SetParent(fillAreaGO.transform, false);
+        Image fillImage = fillGO.GetComponent<Image>();
+        fillImage.color = new Color(0.2f, 0.6f, 0.2f, 1f);
+        RectTransform fillRect = fillGO.GetComponent<RectTransform>();
+        fillRect.anchorMin = Vector2.zero;
+        fillRect.anchorMax = Vector2.one;
+        fillRect.offsetMin = Vector2.zero;
+        fillRect.offsetMax = Vector2.zero;
+
+        GameObject handleAreaGO = new GameObject("Handle Slide Area");
+        handleAreaGO.transform.SetParent(sliderGO.transform, false);
+        RectTransform handleAreaRect = handleAreaGO.AddComponent<RectTransform>();
+        handleAreaRect.anchorMin = Vector2.zero;
+        handleAreaRect.anchorMax = Vector2.one;
+        handleAreaRect.offsetMin = new Vector2(10f, 0f);
+        handleAreaRect.offsetMax = new Vector2(-10f, 0f);
+
+        GameObject handleGO = new GameObject("Handle", typeof(Image));
+        handleGO.transform.SetParent(handleAreaGO.transform, false);
+        Image handleImage = handleGO.GetComponent<Image>();
+        handleImage.color = Color.white;
+        RectTransform handleRect = handleGO.GetComponent<RectTransform>();
+        handleRect.sizeDelta = new Vector2(20f, 0f);
+        handleRect.anchorMin = new Vector2(0f, 0f);
+        handleRect.anchorMax = new Vector2(0f, 1f);
+
+        slider.fillRect = fillRect;
+        slider.handleRect = handleRect;
+        slider.targetGraphic = handleImage;
+
+        valueText = CreateText("ValueText", container.transform, "6 игроков", 18);
+        valueText.alignment = TextAnchor.MiddleCenter;
+        valueText.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+        RectTransform valueRect = valueText.GetComponent<RectTransform>();
+        valueRect.anchorMin = new Vector2(0.75f, 0f);
+        valueRect.anchorMax = new Vector2(1f, 0.5f);
+        valueRect.offsetMin = Vector2.zero;
+        valueRect.offsetMax = Vector2.zero;
+    }
+
+    private static void CreateDifficultyButtons(Transform parent, out Button easyBtn, out Button mediumBtn, out Button hardBtn)
+    {
+        GameObject container = new GameObject("DifficultyButtonsContainer");
+        Undo.RegisterCreatedObjectUndo(container, "Create Difficulty Buttons Container");
+        container.transform.SetParent(parent, false);
+        RectTransform containerRect = container.AddComponent<RectTransform>();
+        containerRect.sizeDelta = new Vector2(360f, 80f);
+
+        Text label = CreateText("Label", container.transform, "сложность ботов:", 18);
+        label.alignment = TextAnchor.MiddleLeft;
+        label.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+        RectTransform labelRect = label.GetComponent<RectTransform>();
+        labelRect.anchorMin = new Vector2(0f, 1f);
+        labelRect.anchorMax = new Vector2(1f, 1f);
+        labelRect.pivot = new Vector2(0.5f, 1f);
+        labelRect.anchoredPosition = new Vector2(0f, 0f);
+        labelRect.sizeDelta = new Vector2(0f, 25f);
+
+        GameObject buttonsRow = new GameObject("ButtonsRow", typeof(HorizontalLayoutGroup));
+        Undo.RegisterCreatedObjectUndo(buttonsRow, "Create Buttons Row");
+        buttonsRow.transform.SetParent(container.transform, false);
+        HorizontalLayoutGroup hlg = buttonsRow.GetComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 10f;
+        hlg.childAlignment = TextAnchor.MiddleCenter;
+        hlg.childControlWidth = false;
+        hlg.childControlHeight = false;
+        RectTransform rowRect = buttonsRow.GetComponent<RectTransform>();
+        rowRect.anchorMin = new Vector2(0f, 0f);
+        rowRect.anchorMax = new Vector2(1f, 0.6f);
+        rowRect.offsetMin = Vector2.zero;
+        rowRect.offsetMax = Vector2.zero;
+
+        easyBtn = CreateButton("DifficultyEasyButton", buttonsRow.transform, "Легкая 🟢");
+        SetButtonLayout(easyBtn, 110f, 40f);
+        mediumBtn = CreateButton("DifficultyMediumButton", buttonsRow.transform, "Средняя 🟡");
+        SetButtonLayout(mediumBtn, 110f, 40f);
+        hardBtn = CreateButton("DifficultyHardButton", buttonsRow.transform, "Тяжелая 🔴");
+        SetButtonLayout(hardBtn, 110f, 40f);
+
+        // Средняя выбрана по умолчанию - зелёный цвет
+        var colors = mediumBtn.colors;
+        colors.normalColor = new Color(0.2f, 0.6f, 0.2f, 1f);
+        mediumBtn.colors = colors;
+    }
+
+    private static void CreateLanguageButtonsControl(Transform parent, out Button russianBtn, out Button englishBtn)
+    {
+        GameObject container = new GameObject("LanguageButtonsContainer");
+        Undo.RegisterCreatedObjectUndo(container, "Create Language Buttons Container");
+        container.transform.SetParent(parent, false);
+        RectTransform containerRect = container.AddComponent<RectTransform>();
+        containerRect.anchorMin = new Vector2(0.5f, 1f);
+        containerRect.anchorMax = new Vector2(0.5f, 1f);
+        containerRect.pivot = new Vector2(0.5f, 1f);
+        containerRect.anchoredPosition = new Vector2(-120f, -270f);
+        containerRect.sizeDelta = new Vector2(300f, 80f);
+
+        Text label = CreateText("Label", container.transform, "язык:", 18);
+        label.alignment = TextAnchor.MiddleLeft;
+        label.color = Color.white;
+        RectTransform labelRect = label.GetComponent<RectTransform>();
+        labelRect.anchorMin = new Vector2(0f, 1f);
+        labelRect.anchorMax = new Vector2(1f, 1f);
+        labelRect.pivot = new Vector2(0.5f, 1f);
+        labelRect.anchoredPosition = new Vector2(0f, 0f);
+        labelRect.sizeDelta = new Vector2(0f, 25f);
+
+        GameObject buttonsRow = new GameObject("ButtonsRow", typeof(HorizontalLayoutGroup));
+        Undo.RegisterCreatedObjectUndo(buttonsRow, "Create Language Buttons Row");
+        buttonsRow.transform.SetParent(container.transform, false);
+        HorizontalLayoutGroup hlg = buttonsRow.GetComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 10f;
+        hlg.childAlignment = TextAnchor.MiddleLeft;
+        hlg.childControlWidth = false;
+        hlg.childControlHeight = false;
+        RectTransform rowRect = buttonsRow.GetComponent<RectTransform>();
+        rowRect.anchorMin = new Vector2(0f, 0f);
+        rowRect.anchorMax = new Vector2(1f, 0.6f);
+        rowRect.offsetMin = Vector2.zero;
+        rowRect.offsetMax = Vector2.zero;
+
+        russianBtn = CreateButton("LanguageRussianButton", buttonsRow.transform, "Русский");
+        SetButtonLayout(russianBtn, 120f, 40f);
+        englishBtn = CreateButton("LanguageEnglishButton", buttonsRow.transform, "English");
+        SetButtonLayout(englishBtn, 120f, 40f);
+
+        // Русский выбран по умолчанию
+        var colors = russianBtn.colors;
+        colors.normalColor = new Color(0.2f, 0.6f, 0.2f, 1f);
+        russianBtn.colors = colors;
+    }
+
+    private static void CreateCardThemeButtonsControl(Transform parent, out Button[] themeButtons)
+    {
+        // Получаем темы из CardThemeService (3 темы по умолчанию)
+        string[] themeNames = { "Классическая", "Минимализм", "Ретро" };
+        themeButtons = new Button[themeNames.Length];
+
+        GameObject container = new GameObject("CardThemeButtonsContainer");
+        Undo.RegisterCreatedObjectUndo(container, "Create Card Theme Buttons Container");
+        container.transform.SetParent(parent, false);
+        RectTransform containerRect = container.AddComponent<RectTransform>();
+        containerRect.anchorMin = new Vector2(0.5f, 1f);
+        containerRect.anchorMax = new Vector2(0.5f, 1f);
+        containerRect.pivot = new Vector2(0.5f, 1f);
+        containerRect.anchoredPosition = new Vector2(-120f, -370f);
+        containerRect.sizeDelta = new Vector2(300f, 80f);
+
+        Text label = CreateText("Label", container.transform, "оформление карт:", 18);
+        label.alignment = TextAnchor.MiddleLeft;
+        label.color = Color.white;
+        RectTransform labelRect = label.GetComponent<RectTransform>();
+        labelRect.anchorMin = new Vector2(0f, 1f);
+        labelRect.anchorMax = new Vector2(1f, 1f);
+        labelRect.pivot = new Vector2(0.5f, 1f);
+        labelRect.anchoredPosition = new Vector2(0f, 0f);
+        labelRect.sizeDelta = new Vector2(0f, 25f);
+
+        GameObject buttonsRow = new GameObject("ButtonsRow", typeof(HorizontalLayoutGroup));
+        Undo.RegisterCreatedObjectUndo(buttonsRow, "Create Theme Buttons Row");
+        buttonsRow.transform.SetParent(container.transform, false);
+        HorizontalLayoutGroup hlg = buttonsRow.GetComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 8f;
+        hlg.childAlignment = TextAnchor.MiddleLeft;
+        hlg.childControlWidth = false;
+        hlg.childControlHeight = false;
+        RectTransform rowRect = buttonsRow.GetComponent<RectTransform>();
+        rowRect.anchorMin = new Vector2(0f, 0f);
+        rowRect.anchorMax = new Vector2(1f, 0.6f);
+        rowRect.offsetMin = Vector2.zero;
+        rowRect.offsetMax = Vector2.zero;
+
+        for (int i = 0; i < themeNames.Length; i++)
+        {
+            themeButtons[i] = CreateButton($"CardThemeButton{i}", buttonsRow.transform, themeNames[i]);
+            SetButtonLayout(themeButtons[i], 90f, 40f);
+            
+            // Первая тема выбрана по умолчанию
+            if (i == 0)
+            {
+                var colors = themeButtons[i].colors;
+                colors.normalColor = new Color(0.2f, 0.6f, 0.2f, 1f);
+                themeButtons[i].colors = colors;
+            }
+        }
+    }
+
     private static Image CreateBrightnessOverlay(Transform canvasTransform)
     {
         GameObject overlay = new GameObject("BrightnessOverlay", typeof(Image));
@@ -1378,9 +1869,37 @@ private static GameObject CreateUserHeader(Transform parent, out Image avatarIma
 
     private static void SetLocalizationEntry(SerializedProperty entriesProp, int index, string key, string russian, string english)
     {
+        if (entriesProp == null || !entriesProp.isArray)
+        {
+            Debug.LogWarning($"SetLocalizationEntry: entriesProp is null or not an array");
+            return;
+        }
+        
+        // Увеличиваем размер массива, если индекс выходит за границы
+        if (index >= entriesProp.arraySize)
+        {
+            entriesProp.arraySize = index + 1;
+        }
+        
+        if (index < 0 || index >= entriesProp.arraySize)
+        {
+            Debug.LogWarning($"SetLocalizationEntry: index {index} is out of bounds (array size: {entriesProp.arraySize})");
+            return;
+        }
+        
         SerializedProperty entryProp = entriesProp.GetArrayElementAtIndex(index);
-        entryProp.FindPropertyRelative("key").stringValue = key;
-        entryProp.FindPropertyRelative("russian").stringValue = russian;
-        entryProp.FindPropertyRelative("english").stringValue = english;
+        if (entryProp == null)
+        {
+            Debug.LogWarning($"SetLocalizationEntry: failed to get array element at index {index}");
+            return;
+        }
+        
+        SerializedProperty keyProp = entryProp.FindPropertyRelative("key");
+        SerializedProperty russianProp = entryProp.FindPropertyRelative("russian");
+        SerializedProperty englishProp = entryProp.FindPropertyRelative("english");
+        
+        if (keyProp != null) keyProp.stringValue = key;
+        if (russianProp != null) russianProp.stringValue = russian;
+        if (englishProp != null) englishProp.stringValue = english;
     }
 }

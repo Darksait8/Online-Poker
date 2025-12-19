@@ -28,7 +28,6 @@ public class AdvertisementPanel : MonoBehaviour
     public event Action OnAdCompleted;
     public event Action OnAdClosed;
 
-    private bool isVideoAd = false;
     private float currentTimer = 0f;
     private bool canClose = false;
     private bool isCompleted = false;
@@ -163,7 +162,6 @@ public class AdvertisementPanel : MonoBehaviour
 
     private void ShowVideoAd(string videoPath, Action onVideoComplete = null)
     {
-        isVideoAd = true;
         videoContainer.SetActive(true);
         imageContainer.SetActive(false);
 
@@ -214,7 +212,6 @@ public class AdvertisementPanel : MonoBehaviour
             return;
         }
 
-        isVideoAd = false;
         videoContainer.SetActive(false);
         imageContainer.SetActive(true);
 

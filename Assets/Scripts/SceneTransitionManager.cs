@@ -7,6 +7,7 @@ public class SceneTransitionManager : MonoBehaviour
     [SerializeField] private string authSceneName = "Auth";
     [SerializeField] private string mainMenuSceneName = "MainMenu";
     [SerializeField] private string gameSceneName = "Main";
+    [SerializeField] private string connectionSceneName = "Connection";
     
     [Header("Настройки")]
     [SerializeField] private bool checkAuthOnStart = true;
@@ -21,6 +22,14 @@ public class SceneTransitionManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            
+            // Автоматически создаем UGS менеджеры
+            if (UGSInitializer == null)
+            {
+                GameObject ugsInitializerObj = new GameObject("UGSInitializer");
+                ugsInitializerObj.transform.SetParent(transform);
+                ugsInitializerObj.AddComponent<UGSInitializer>();
+            }
         }
         else
         {
@@ -31,6 +40,8 @@ public class SceneTransitionManager : MonoBehaviour
         // Подписываемся на события авторизации
         AuthManager.OnUserLoggedOut += OnUserLoggedOut;
     }
+    
+    private static UGSInitializer UGSInitializer => FindObjectOfType<UGSInitializer>();
     
     private void Start()
     {
@@ -110,7 +121,30 @@ public class SceneTransitionManager : MonoBehaviour
             return;
         }
         
-        LoadScene(gameSceneName);
+        // Если это онлайн стол, сначала загружаем сцену подключения
+        if (TableRuntimeConfig.HasConfig && TableRuntimeConfig.IsOnlineTable)
+        {
+            LoadConnectionScene();
+        }
+        else
+        {
+            LoadScene(gameSceneName);
+        }
+    }
+    
+    /// <summary>
+    /// Загружает сцену подключения к Photon
+    /// </summary>
+    public void LoadConnectionScene()
+    {
+        if (!AuthManager.IsLoggedIn)
+        {
+            Debug.LogWarning("Попытка загрузить сцену подключения без авторизации. Перенаправляем к авторизации.");
+            LoadAuthScene();
+            return;
+        }
+        
+        LoadScene(connectionSceneName);
     }
     
     /// <summary>
@@ -146,8 +180,77 @@ public class SceneTransitionManager : MonoBehaviour
         string sceneName = GetCurrentSceneToLoad();
         if (!string.IsNullOrEmpty(sceneName))
         {
-            SceneManager.LoadScene(sceneName);
+            // Проверяем, существует ли сцена в Build Settings
+            if (SceneExistsInBuildSettings(sceneName))
+            {
+                try
+                {
+                    SceneManager.LoadScene(sceneName);
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Ошибка загрузки сцены '{sceneName}': {e.Message}");
+                    HandleSceneLoadError(sceneName);
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"Сцена '{sceneName}' не найдена в Build Settings!");
+                HandleSceneLoadError(sceneName);
+            }
         }
+    }
+    
+    /// <summary>
+    /// Обрабатывает ошибку загрузки сцены
+    /// </summary>
+    private void HandleSceneLoadError(string sceneName)
+    {
+        // Если это сцена Connection и она не найдена, загружаем игровую сцену напрямую
+        if (sceneName == connectionSceneName)
+        {
+            Debug.LogWarning($"Сцена Connection не найдена. Загружаю игровую сцену '{gameSceneName}' напрямую...");
+            if (SceneExistsInBuildSettings(gameSceneName))
+            {
+                try
+                {
+                    SceneManager.LoadScene(gameSceneName);
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Ошибка загрузки игровой сцены '{gameSceneName}': {e.Message}");
+                }
+            }
+            else
+            {
+                Debug.LogError($"Игровая сцена '{gameSceneName}' также не найдена в Build Settings!");
+            }
+        }
+        else
+        {
+            Debug.LogError($"Не удалось загрузить сцену '{sceneName}'. Добавьте её в Build Settings через File → Build Settings.");
+        }
+    }
+    
+    /// <summary>
+    /// Проверяет, существует ли сцена в Build Settings
+    /// </summary>
+    private bool SceneExistsInBuildSettings(string sceneName)
+    {
+        #if UNITY_EDITOR
+        foreach (var scene in UnityEditor.EditorBuildSettings.scenes)
+        {
+            if (scene.path.EndsWith($"/{sceneName}.unity"))
+            {
+                return scene.enabled;
+            }
+        }
+        return false;
+        #else
+        // В runtime всегда возвращаем true, так как Build Settings недоступны
+        // Unity сам выдаст ошибку если сцена не найдена
+        return true;
+        #endif
     }
     
     private string currentSceneToLoad = "";

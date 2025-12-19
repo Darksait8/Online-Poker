@@ -215,6 +215,7 @@ public class NewBehaviourScript : MonoBehaviour
 
     public void ShowBet(int chips)
     {
+        if (this == null) return;
         if (chipDisplay == null)
             chipDisplay = GetComponentInChildren<BetChipDisplay>(true);
         Debug.Log($"[{name}] ShowBet() chips={chips}, hasChipDisplay={(chipDisplay != null)}");
@@ -235,10 +236,11 @@ public class NewBehaviourScript : MonoBehaviour
 
     public void ShowChips(bool show)
     {
+        if (this == null) return;
         if (chipDisplay == null)
             chipDisplay = GetComponentInChildren<BetChipDisplay>(true);
         chipDisplay?.Show(show);
-        }
+    }
 
     public void RepositionChipsRelativeToSeat()
     {

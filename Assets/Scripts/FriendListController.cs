@@ -1,8 +1,10 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
+using Photon.Pun;
 
 public class FriendListController : MonoBehaviour
 {
@@ -32,6 +34,13 @@ public class FriendListController : MonoBehaviour
     private void OnEnable()
     {
         AuthManager.OnFriendsChanged += HandleFriendsChanged;
+        
+        // Подписываемся на события UGS Friends, если доступны
+        if (UGSFriendsManager.Instance != null)
+        {
+            UGSFriendsManager.OnFriendsUpdated += HandleUGSFriendsUpdated;
+        }
+        
         RefreshList();
         SetStatus(string.Empty);
     }
@@ -39,15 +48,59 @@ public class FriendListController : MonoBehaviour
     private void OnDisable()
     {
         AuthManager.OnFriendsChanged -= HandleFriendsChanged;
+        
+        if (UGSFriendsManager.Instance != null)
+        {
+            UGSFriendsManager.OnFriendsUpdated -= HandleUGSFriendsUpdated;
+        }
+    }
+    
+    private async void HandleUGSFriendsUpdated(List<UGSFriendInfo> ugsFriends)
+    {
+        // Обновляем список друзей из UGS
+        await RefreshUGSFriendsAsync();
+    }
+    
+    private async System.Threading.Tasks.Task RefreshUGSFriendsAsync()
+    {
+        if (UGSFriendsManager.Instance != null && UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn)
+        {
+            try
+            {
+                await UGSFriendsManager.Instance.RefreshFriendsAsync();
+                RefreshList();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Ошибка обновления друзей из UGS: {e.Message}");
+            }
+        }
     }
 
     public void RefreshList()
     {
         ClearItems();
+        
+        // Сначала добавляем локальных друзей
         var friends = AuthManager.GetFriends();
         foreach (string friend in friends)
         {
             CreateFriendItem(friend);
+        }
+        
+        // Затем добавляем друзей из UGS, если доступны
+        if (UGSFriendsManager.Instance != null && UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn)
+        {
+            var ugsFriends = UGSFriendsManager.Instance.Friends;
+            foreach (var ugsFriend in ugsFriends)
+            {
+                string friendName = ugsFriend.DisplayName ?? ugsFriend.Id;
+                // Проверяем, чтобы не дублировать друзей (используем LINQ Contains)
+                if (!friends.Any(f => string.Equals(f, friendName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    CreateFriendItem(friendName);
+                }
+            }
         }
     }
 
@@ -56,144 +109,69 @@ public class FriendListController : MonoBehaviour
         RefreshList();
     }
 
-    private void OnAddFriendClicked()
+    private async void OnAddFriendClicked()
     {
         string candidate = addFriendInput != null ? addFriendInput.text : string.Empty;
         candidate = candidate?.Trim();
         
         if (string.IsNullOrEmpty(candidate))
         {
-            SetStatus("Введите имя пользователя.");
+            SetStatus("Введите имя пользователя или Player ID.");
             return;
         }
         
-        // Пытаемся добавить друга через сервер, если включена серверная авторизация
-        AuthServerSync authSync = AuthServerSync.Instance;
-        if (authSync != null && authSync.UseServerAuth)
+        bool sent = false;
+        
+        // Пытаемся отправить через UGS, если доступен и candidate похож на Player ID
+        if (UGSFriendsManager.Instance != null && UGSServiceManager.Instance != null && UGSServiceManager.Instance.IsSignedIn)
         {
-            // Проверяем пользователя на сервере асинхронно
-            StartCoroutine(CheckUserAndAddFriend(candidate, authSync));
-            return;
+            // Если candidate похож на Player ID (обычно длинная строка), пробуем UGS
+            if (candidate.Length > 20 || candidate.Contains("-"))
+            {
+                try
+                {
+                    sent = await UGSFriendsManager.Instance.SendFriendRequestAsync(candidate);
+                    if (sent)
+                    {
+                        SetStatus("Заявка отправлена через UGS");
+                        if (addFriendInput != null)
+                            addFriendInput.text = string.Empty;
+                        await RefreshUGSFriendsAsync();
+                        return;
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"Ошибка отправки заявки через UGS: {e.Message}");
+                }
+            }
         }
         
-        // Fallback на локальную проверку
-        if (AuthManager.TrySendFriendRequest(candidate, out string error))
+        // Пытаемся отправить через Photon если подключены
+        if (!sent && PhotonSocialManager.Instance != null && Photon.Pun.PhotonNetwork.IsConnected)
+        {
+            sent = PhotonSocialManager.Instance.SendFriendRequestViaPhoton(candidate);
+        }
+        
+        if (!sent)
+        {
+            // Fallback на локальную отправку
+            if (AuthManager.TrySendFriendRequest(candidate, out string error))
+            {
+                SetStatus("Заявка отправлена (локально)");
+                if (addFriendInput != null)
+                    addFriendInput.text = string.Empty;
+            }
+            else
+            {
+                SetStatus(error);
+            }
+        }
+        else
         {
             SetStatus("Заявка отправлена");
             if (addFriendInput != null)
                 addFriendInput.text = string.Empty;
-        }
-        else
-        {
-            SetStatus(error);
-        }
-    }
-    
-    private System.Collections.IEnumerator CheckUserAndAddFriend(string username, AuthServerSync authSync)
-    {
-        SetStatus("Проверка пользователя...");
-        
-        var authClient = authSync?.Client ?? authSync?.GetComponent<AuthServerClient>();
-        
-        if (authClient == null)
-        {
-            SetStatus("Ошибка: AuthServerClient не найден");
-            yield break;
-        }
-        
-        // Проверяем подключение
-        if (!authClient.IsConnected())
-        {
-            authClient.Connect();
-            float timeout = 5f;
-            float elapsed = 0f;
-            while (!authClient.IsConnected() && elapsed < timeout)
-            {
-                yield return new WaitForSeconds(0.1f);
-                elapsed += 0.1f;
-            }
-            
-            if (!authClient.IsConnected())
-            {
-                SetStatus("Не удалось подключиться к серверу");
-                yield break;
-            }
-        }
-        
-        // Запрашиваем профиль пользователя
-        bool requestCompleted = false;
-        bool userExists = false;
-        Dictionary<string, object> userData = null;
-        
-        System.Action<bool, Dictionary<string, object>> handler = null;
-        handler = (success, data) =>
-        {
-            authClient.OnProfileResponse -= handler;
-            userExists = success && data != null;
-            userData = data;
-            requestCompleted = true;
-        };
-        
-        authClient.OnProfileResponse += handler;
-        authClient.GetProfile(username);
-        
-        // Ждем ответа
-        float waitTimeout = 5f;
-        float waitElapsed = 0f;
-        while (!requestCompleted && waitElapsed < waitTimeout)
-        {
-            yield return new WaitForSeconds(0.1f);
-            waitElapsed += 0.1f;
-        }
-        
-        if (!userExists || userData == null)
-        {
-            SetStatus("Пользователь не найден");
-            yield break;
-        }
-        
-        // Получаем правильное имя пользователя из ответа сервера
-        string resolvedUsername = userData.ContainsKey("username") ? userData["username"].ToString() : username;
-        
-        // Сохраняем профиль пользователя локально, чтобы TrySendFriendRequest мог его найти
-        UserProfile serverProfile = new UserProfile
-        {
-            username = resolvedUsername,
-            email = userData.ContainsKey("email") ? userData["email"].ToString() : "",
-            passwordHash = "",
-            registrationDate = DateTime.Parse(userData.ContainsKey("registration_date") ? userData["registration_date"].ToString() : DateTime.Now.ToString()),
-            lastLoginDate = DateTime.Now,
-            isLoggedIn = false,
-            chips = userData.ContainsKey("chips") ? Convert.ToInt32(userData["chips"]) : 1000,
-            XP = userData.ContainsKey("xp") ? Convert.ToInt32(userData["xp"]) : 0
-        };
-        
-        // Инициализируем коллекции друзей
-        if (serverProfile.friends == null)
-            serverProfile.friends = new List<string>();
-        if (serverProfile.incomingFriendRequests == null)
-            serverProfile.incomingFriendRequests = new List<FriendRequestData>();
-        if (serverProfile.outgoingFriendRequests == null)
-            serverProfile.outgoingFriendRequests = new List<FriendRequestData>();
-        
-        // Сохраняем профиль локально
-        bool saved = UserDataManager.SaveUserProfile(serverProfile);
-        Debug.Log($"FriendListController: Профиль пользователя {resolvedUsername} сохранен локально: {saved}");
-        
-        // Даем время на сохранение
-        yield return new WaitForSeconds(0.1f);
-        
-        // Пользователь найден на сервере, добавляем в друзья (используем правильное имя)
-        if (AuthManager.TrySendFriendRequest(resolvedUsername, out string error))
-        {
-            SetStatus("Заявка отправлена");
-            if (addFriendInput != null)
-                addFriendInput.text = string.Empty;
-        }
-        else
-        {
-            Debug.LogWarning($"FriendListController: Не удалось отправить заявку: {error}");
-            SetStatus(error);
         }
     }
 

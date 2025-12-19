@@ -36,5 +36,35 @@ public class DropdownTemplateStyler : MonoBehaviour
                 txt.fontSize = fontSize;
             txt.alignment = TextAnchor.MiddleLeft;
         }
+        
+        // Устанавливаем белый фон для элементов списка
+        Image[] images = GetComponentsInChildren<Image>(true);
+        foreach (Image img in images)
+        {
+            // Пропускаем checkmark и другие специальные изображения
+            if (img.name.Contains("Checkmark") || img.name.Contains("Arrow"))
+                continue;
+            
+            // Устанавливаем белый фон для фоновых элементов
+            Transform parent = img.transform.parent;
+            if (parent != null && (parent.name.Contains("Item") || parent.name.Contains("Toggle")))
+            {
+                img.color = Color.white;
+            }
+        }
+    }
+    
+    // Вызывается каждый кадр для применения цветов к динамически создаваемым элементам
+    private void Update()
+    {
+        // Применяем цвета к новым элементам, которые могут быть созданы при открытии dropdown
+        Text[] texts = GetComponentsInChildren<Text>(true);
+        foreach (Text txt in texts)
+        {
+            if (txt.color != itemTextColor)
+            {
+                txt.color = itemTextColor;
+            }
+        }
     }
 }

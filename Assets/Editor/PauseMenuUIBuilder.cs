@@ -41,6 +41,7 @@ public class PauseMenuUIBuilder : EditorWindow
             out GameObject pauseContent,
             out Button resumeButton,
             out Button settingsButton,
+            out Button inviteFriendsButton,
             out Button mainMenuButton,
             out Button exitButton,
             out GameObject settingsPanel,
@@ -49,7 +50,8 @@ public class PauseMenuUIBuilder : EditorWindow
             out Text volumeLabel,
             out Slider brightnessSlider,
             out Text brightnessLabel,
-            out Button backButton);
+            out Button backButton,
+            out InviteFriendsPanel inviteFriendsPanel);
 
         // Яркостный оверлей
         Image brightnessOverlay = CreateBrightnessOverlay(canvas.transform, root.transform);
@@ -64,15 +66,16 @@ public class PauseMenuUIBuilder : EditorWindow
 
         SerializedObject locSO = new SerializedObject(localization);
         SerializedProperty entriesProp = locSO.FindProperty("entries");
-        entriesProp.arraySize = 8;
+        entriesProp.arraySize = 9;
         SetLocalizationEntry(entriesProp, 0, "ResumeButton", "продолжить", "Resume");
         SetLocalizationEntry(entriesProp, 1, "SettingsButton", "настройки", "Settings");
-        SetLocalizationEntry(entriesProp, 2, "MainMenuButton", "главное меню", "Main menu");
-        SetLocalizationEntry(entriesProp, 3, "ExitButton", "выход", "Exit");
-        SetLocalizationEntry(entriesProp, 4, settingsTitle.gameObject.name, "Настройки", "Settings");
-        SetLocalizationEntry(entriesProp, 5, volumeLabel.gameObject.name, "громкость", "Volume");
-        SetLocalizationEntry(entriesProp, 6, brightnessLabel.gameObject.name, "яркость", "Brightness");
-        SetLocalizationEntry(entriesProp, 7, backButton.gameObject.name, "назад", "Back");
+        SetLocalizationEntry(entriesProp, 2, "InviteFriendsButton", "пригласить друзей", "Invite Friends");
+        SetLocalizationEntry(entriesProp, 3, "MainMenuButton", "главное меню", "Main menu");
+        SetLocalizationEntry(entriesProp, 4, "ExitButton", "выход", "Exit");
+        SetLocalizationEntry(entriesProp, 5, settingsTitle.gameObject.name, "Настройки", "Settings");
+        SetLocalizationEntry(entriesProp, 6, volumeLabel.gameObject.name, "громкость", "Volume");
+        SetLocalizationEntry(entriesProp, 7, brightnessLabel.gameObject.name, "яркость", "Brightness");
+        SetLocalizationEntry(entriesProp, 8, backButton.gameObject.name, "назад", "Back");
         locSO.ApplyModifiedProperties();
 
         // Присваиваем ссылки контроллеру
@@ -81,6 +84,8 @@ public class PauseMenuUIBuilder : EditorWindow
         controllerSO.FindProperty("pauseContent").objectReferenceValue = pauseContent;
         controllerSO.FindProperty("resumeButton").objectReferenceValue = resumeButton;
         controllerSO.FindProperty("settingsButton").objectReferenceValue = settingsButton;
+        controllerSO.FindProperty("inviteFriendsButton").objectReferenceValue = inviteFriendsButton;
+        controllerSO.FindProperty("inviteFriendsPanel").objectReferenceValue = inviteFriendsPanel;
         controllerSO.FindProperty("mainMenuButton").objectReferenceValue = mainMenuButton;
         controllerSO.FindProperty("exitButton").objectReferenceValue = exitButton;
         controllerSO.FindProperty("settingsPanel").objectReferenceValue = settingsPanel;
@@ -151,6 +156,7 @@ public class PauseMenuUIBuilder : EditorWindow
         out GameObject content,
         out Button resumeButton,
         out Button settingsButton,
+        out Button inviteFriendsButton,
         out Button mainMenuButton,
         out Button exitButton,
         out GameObject settingsPanel,
@@ -159,7 +165,8 @@ public class PauseMenuUIBuilder : EditorWindow
         out Text volumeLabel,
         out Slider brightnessSlider,
         out Text brightnessLabel,
-        out Button backButton)
+        out Button backButton,
+        out InviteFriendsPanel inviteFriendsPanel)
     {
         GameObject panel = new GameObject("PausePanel", typeof(RectTransform), typeof(Image));
         Undo.RegisterCreatedObjectUndo(panel, "Create PausePanel");
@@ -197,6 +204,7 @@ public class PauseMenuUIBuilder : EditorWindow
 
         resumeButton = CreateMenuButton("ResumeButton", content.transform, "Resume");
         settingsButton = CreateMenuButton("SettingsButton", content.transform, "Settings");
+        inviteFriendsButton = CreateMenuButton("InviteFriendsButton", content.transform, "Invite Friends");
         mainMenuButton = CreateMenuButton("MainMenuButton", content.transform, "Main menu");
         exitButton = CreateMenuButton("ExitButton", content.transform, "Exit");
 
@@ -243,6 +251,105 @@ public class PauseMenuUIBuilder : EditorWindow
         backButton = CreateMenuButton("BackFromSettingsButton", settingsContent.transform, "Back");
 
         settingsPanel.SetActive(false);
+
+        // Панель приглашения друзей
+        GameObject invitePanel = new GameObject("InviteFriendsPanel", typeof(RectTransform), typeof(Image));
+        Undo.RegisterCreatedObjectUndo(invitePanel, "Create InviteFriendsPanel");
+        invitePanel.transform.SetParent(panel.transform, false);
+        RectTransform invitePanelRect = invitePanel.GetComponent<RectTransform>();
+        invitePanelRect.anchorMin = Vector2.zero;
+        invitePanelRect.anchorMax = Vector2.one;
+        invitePanelRect.offsetMin = Vector2.zero;
+        invitePanelRect.offsetMax = Vector2.zero;
+        Image invitePanelImage = invitePanel.GetComponent<Image>();
+        invitePanelImage.color = new Color(0f, 0f, 0f, 0.8f);
+
+        GameObject inviteContent = new GameObject("InviteContent", typeof(RectTransform), typeof(Image));
+        Undo.RegisterCreatedObjectUndo(inviteContent, "Create InviteContent");
+        inviteContent.transform.SetParent(invitePanel.transform, false);
+        RectTransform inviteContentRect = inviteContent.GetComponent<RectTransform>();
+        inviteContentRect.anchorMin = new Vector2(0.5f, 0.5f);
+        inviteContentRect.anchorMax = new Vector2(0.5f, 0.5f);
+        inviteContentRect.pivot = new Vector2(0.5f, 0.5f);
+        inviteContentRect.sizeDelta = new Vector2(600f, 500f);
+        inviteContentRect.anchoredPosition = Vector2.zero;
+        Image inviteContentImage = inviteContent.GetComponent<Image>();
+        inviteContentImage.color = new Color(0.2f, 0.2f, 0.2f, 0.95f);
+
+        VerticalLayoutGroup inviteLayout = inviteContent.AddComponent<VerticalLayoutGroup>();
+        inviteLayout.spacing = 15f;
+        inviteLayout.padding = new RectOffset(30, 30, 30, 30);
+        inviteLayout.childAlignment = TextAnchor.MiddleCenter;
+
+        // Заголовок
+        Text inviteTitle = CreateTextElement("InviteTitle", inviteContent.transform, "Пригласить друзей к столу", 24, Color.white, TextAnchor.MiddleCenter);
+        RectTransform inviteTitleRect = inviteTitle.GetComponent<RectTransform>();
+        inviteTitleRect.sizeDelta = new Vector2(540f, 40f);
+
+        // Информация о текущем столе
+        Text tableInfo = CreateTextElement("TableInfo", inviteContent.transform, "Текущий стол", 18, Color.white, TextAnchor.MiddleCenter);
+        RectTransform tableInfoRect = tableInfo.GetComponent<RectTransform>();
+        tableInfoRect.sizeDelta = new Vector2(540f, 30f);
+
+        // ScrollView для списка друзей
+        GameObject inviteScrollGO = new GameObject("FriendsScrollView", typeof(Image), typeof(ScrollRect));
+        Undo.RegisterCreatedObjectUndo(inviteScrollGO, "Create Invite Friends Scroll");
+        inviteScrollGO.transform.SetParent(inviteContent.transform, false);
+        Image inviteScrollImage = inviteScrollGO.GetComponent<Image>();
+        inviteScrollImage.color = new Color(0f, 0f, 0f, 0.25f);
+        RectTransform inviteScrollRect = inviteScrollGO.GetComponent<RectTransform>();
+        inviteScrollRect.sizeDelta = new Vector2(540f, 300f);
+
+        GameObject inviteViewport = new GameObject("Viewport", typeof(RectMask2D), typeof(Image));
+        Undo.RegisterCreatedObjectUndo(inviteViewport, "Create Invite Viewport");
+        inviteViewport.transform.SetParent(inviteScrollGO.transform, false);
+        RectTransform inviteViewportRect = inviteViewport.GetComponent<RectTransform>();
+        inviteViewportRect.anchorMin = Vector2.zero;
+        inviteViewportRect.anchorMax = Vector2.one;
+        inviteViewportRect.offsetMin = Vector2.zero;
+        inviteViewportRect.offsetMax = Vector2.zero;
+
+        GameObject inviteItemsRoot = new GameObject("FriendsList", typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+        Undo.RegisterCreatedObjectUndo(inviteItemsRoot, "Create Invite Friends List");
+        inviteItemsRoot.transform.SetParent(inviteViewport.transform, false);
+        VerticalLayoutGroup inviteItemsLayout = inviteItemsRoot.GetComponent<VerticalLayoutGroup>();
+        inviteItemsLayout.spacing = 10f;
+        inviteItemsLayout.padding = new RectOffset(10, 10, 10, 10);
+        inviteItemsLayout.childAlignment = TextAnchor.UpperLeft;
+        ContentSizeFitter inviteItemsFitter = inviteItemsRoot.GetComponent<ContentSizeFitter>();
+        inviteItemsFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        RectTransform inviteItemsRect = inviteItemsRoot.GetComponent<RectTransform>();
+        inviteItemsRect.anchorMin = new Vector2(0f, 1f);
+        inviteItemsRect.anchorMax = new Vector2(1f, 1f);
+        inviteItemsRect.pivot = new Vector2(0.5f, 1f);
+        inviteItemsRect.sizeDelta = new Vector2(0f, 0f);
+
+        ScrollRect inviteScroll = inviteScrollGO.GetComponent<ScrollRect>();
+        inviteScroll.viewport = inviteViewportRect;
+        inviteScroll.content = inviteItemsRect;
+        inviteScroll.horizontal = false;
+
+        // Статус
+        Text statusText = CreateTextElement("StatusText", inviteContent.transform, "", 16, Color.yellow, TextAnchor.MiddleCenter);
+        RectTransform statusRect = statusText.GetComponent<RectTransform>();
+        statusRect.sizeDelta = new Vector2(540f, 30f);
+
+        // Кнопка закрытия
+        Button closeInviteButton = CreateMenuButton("CloseInviteButton", inviteContent.transform, "Закрыть");
+        RectTransform closeInviteRect = closeInviteButton.GetComponent<RectTransform>();
+        closeInviteRect.sizeDelta = new Vector2(200f, 50f);
+
+        // Компонент InviteFriendsPanel
+        inviteFriendsPanel = invitePanel.AddComponent<InviteFriendsPanel>();
+        SerializedObject invitePanelSO = new SerializedObject(inviteFriendsPanel);
+        invitePanelSO.FindProperty("panel").objectReferenceValue = invitePanel;
+        invitePanelSO.FindProperty("friendsListContainer").objectReferenceValue = inviteItemsRoot.transform;
+        invitePanelSO.FindProperty("closeButton").objectReferenceValue = closeInviteButton;
+        invitePanelSO.FindProperty("statusText").objectReferenceValue = statusText;
+        invitePanelSO.FindProperty("currentTableInfo").objectReferenceValue = tableInfo;
+        invitePanelSO.ApplyModifiedProperties();
+
+        invitePanel.SetActive(false);
 
         return panel;
     }

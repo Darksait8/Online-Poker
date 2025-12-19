@@ -133,24 +133,32 @@ public class BetChipDisplay : MonoBehaviour
 
     public void Show(bool show)
     {
-        EnsureContainer();
-        if (chipContainer != null)
+        if (this == null) return;
+        try
         {
-            if (!show && currentAmount > 0)
+            EnsureContainer();
+            if (chipContainer != null)
             {
-                Debug.Log($"[{name}] BetChipDisplay: ignoring Show(false) due to active amount {currentAmount}");
-                return;
+                if (!show && currentAmount > 0)
+                {
+                    Debug.Log($"[{name}] BetChipDisplay: ignoring Show(false) due to active amount {currentAmount}");
+                    return;
+                }
+                chipContainer.gameObject.SetActive(show);
+                if (show)
+                {
+                    chipContainer.SetAsLastSibling();
+                    PositionContainer();
+                }
             }
-            chipContainer.gameObject.SetActive(show);
-            if (show)
-            {
-                chipContainer.SetAsLastSibling();
-                PositionContainer();
-            }
+            if (!show)
+                Clear();
+            Debug.Log($"[{name}] BetChipDisplay: Show({show})");
         }
-        if (!show)
-            Clear();
-        Debug.Log($"[{name}] BetChipDisplay: Show({show})");
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[{name}] BetChipDisplay.Show error: {e.Message}\n{e.StackTrace}");
+        }
     }
 
     public void Reposition()
@@ -167,19 +175,28 @@ public class BetChipDisplay : MonoBehaviour
 
     private void EnsureContainer()
     {
-        if (chipContainer == null)
+        try
         {
-            var go = new GameObject("ChipContainer", typeof(RectTransform));
-            chipContainer = go.GetComponent<RectTransform>();
+            if (chipContainer == null)
+            {
+                var go = new GameObject("ChipContainer", typeof(RectTransform));
+                chipContainer = go.GetComponent<RectTransform>();
+            }
+
+            ResolveParent();
+
+            RectTransform preferredParent = anchorTarget != null ? anchorTarget :
+                seatRect != null ? seatRect : resolvedParent;
+
+            if (preferredParent != null && chipContainer != null && chipContainer.parent != preferredParent)
+            {
+                chipContainer.SetParent(preferredParent, false);
+            }
         }
-
-        ResolveParent();
-
-        RectTransform preferredParent = anchorTarget != null ? anchorTarget :
-            seatRect != null ? seatRect : resolvedParent;
-
-        if (preferredParent != null && chipContainer.parent != preferredParent)
-            chipContainer.SetParent(preferredParent, false);
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[{name}] BetChipDisplay.EnsureContainer error: {e.Message}\n{e.StackTrace}");
+        }
 
         chipContainer.anchorMin = chipContainer.anchorMax = new Vector2(0.5f, 0.5f);
         chipContainer.pivot = new Vector2(0.5f, 0.5f);
@@ -667,19 +684,45 @@ public class BetChipDisplay : MonoBehaviour
         if (anchorTarget != null)
         {
             resolvedParent = anchorTarget;
-            candidateCanvas = anchorTarget.GetComponentInParent<Canvas>();
+            try
+            {
+                candidateCanvas = anchorTarget.GetComponentInParent<Canvas>();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[{name}] BetChipDisplay: Error getting Canvas from anchorTarget: {e.Message}");
+                candidateCanvas = null;
+            }
         }
+        
         if (candidateCanvas == null)
-            candidateCanvas = GetComponentInParent<Canvas>();
+        {
+            try
+            {
+                candidateCanvas = GetComponentInParent<Canvas>();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[{name}] BetChipDisplay: Error getting Canvas from self: {e.Message}");
+                candidateCanvas = null;
+            }
+        }
 
         if (candidateCanvas != null)
             rootCanvas = candidateCanvas.rootCanvas;
 
         if (rootCanvas == null)
         {
-            var canvases = FindObjectsOfType<Canvas>();
-            if (canvases.Length > 0)
-                rootCanvas = canvases[0].rootCanvas;
+            try
+            {
+                var canvases = FindObjectsOfType<Canvas>();
+                if (canvases != null && canvases.Length > 0)
+                    rootCanvas = canvases[0].rootCanvas;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[{name}] BetChipDisplay: Error finding Canvas: {e.Message}");
+            }
         }
 
         if (rootCanvas != null)
@@ -692,6 +735,13 @@ public class BetChipDisplay : MonoBehaviour
         }
         else
         {
+            resolvedParent = transform as RectTransform;
+        }
+        
+        // Финальная проверка - если всё равно null, создаем fallback
+        if (resolvedParent == null)
+        {
+            Debug.LogWarning($"[{name}] BetChipDisplay: Could not resolve parent, using transform as fallback");
             resolvedParent = transform as RectTransform;
         }
     }

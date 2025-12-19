@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 #if UNITY_EDITOR
@@ -56,7 +59,7 @@ public class LeaderboardPanel : MonoBehaviour
         initialized = true;
     }
 
-    public void Show(IReadOnlyList<LeaderboardEntry> byBalance, IReadOnlyList<LeaderboardEntry> byLevel)
+    public void Show(IReadOnlyList<LeaderboardEntry> byBalance, IReadOnlyList<LeaderboardEntry> byLevel = null)
     {
         TryInitialize();
 
@@ -76,10 +79,15 @@ public class LeaderboardPanel : MonoBehaviour
         if (titleText != null)
             titleText.text = "Таблица лидеров";
 
-        Debug.Log($"LeaderboardPanel: Показываю таблицу лидеров. По балансу: {byBalance?.Count ?? 0}, По уровню: {byLevel?.Count ?? 0}");
+        Debug.Log($"LeaderboardPanel: Показываю таблицу лидеров. По балансу: {byBalance?.Count ?? 0}");
 
         PopulateSection(balanceContainer, "По балансу", byBalance);
-        PopulateSection(levelContainer, "По уровню", byLevel);
+        
+        // Скрываем секцию "По уровню" - больше не используется
+        if (levelContainer != null)
+        {
+            levelContainer.gameObject.SetActive(false);
+        }
 
         // Убеждаемся, что кнопка закрытия подключена
         if (closeButton != null)
@@ -101,6 +109,8 @@ public class LeaderboardPanel : MonoBehaviour
         transform.SetAsLastSibling();
         Canvas.ForceUpdateCanvases();
     }
+    
+    // Методы LoadUGSLeaderboardAsync и CalculateLevelFromXP удалены - секция "По уровню" больше не используется
 
     public void Hide()
     {
